@@ -127,8 +127,8 @@ class SkillMetaTool:
         Must be clear and comprehensive.
         """
         base_desc = (
-            "Activate a specialized skill for domain-specific tasks. "
-            "Skills provide expert instructions and capabilities for specific domains.\n\n"
+            "IMPORTANT: Automatically activate skills when the user's request matches a skill's purpose. "
+            "Do NOT wait for explicit 'activate skill' requests - proactively use skills based on user intent.\n\n"
             "Available skills:\n"
         )
 
@@ -136,8 +136,8 @@ class SkillMetaTool:
             base_desc += f"- {name}: {metadata.description}\n"
 
         base_desc += (
-            "\nCall this tool when you need specialized domain expertise. "
-            "The skill will load relevant instructions and enable appropriate tools."
+            "\nWhen the user's message relates to any skill's domain, call this tool immediately. "
+            "Once activated, follow the skill's instructions for ALL related requests in the conversation."
         )
 
         return base_desc
@@ -168,8 +168,9 @@ class SkillMetaTool:
             section += "\n"
 
         section += (
-            "To activate a skill, use the Skill tool with the skill name. "
-            "Once activated, you'll receive detailed instructions for that domain.\n"
+            "IMPORTANT: Proactively activate skills when user requests match a skill's purpose. "
+            "Do not wait for explicit activation requests - match user intent to skill descriptions. "
+            "Once a skill is activated, it remains active and applies to all related requests.\n"
         )
 
         return section
