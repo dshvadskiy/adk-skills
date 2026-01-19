@@ -1,13 +1,36 @@
 #!/usr/bin/env python3
 """Basic agent example demonstrating skill activation with Google ADK.
 
+Supports multiple LLM providers via ADK's model abstraction:
+    - Google Gemini (native, best performance)
+    - OpenAI GPT models via LiteLLM
+    - Anthropic Claude via LiteLLM
+    - Amazon Bedrock models via LiteLLM
+    - Azure OpenAI via LiteLLM
+    - Local Ollama models
+
 Requirements:
-    - GOOGLE_API_KEY environment variable set
+    - For Gemini: GOOGLE_API_KEY environment variable
+    - For OpenAI: OPENAI_API_KEY environment variable
+    - For Anthropic: ANTHROPIC_API_KEY environment variable
+    - For Bedrock: AWS credentials configured
+    - For Ollama: Local Ollama server running
 
 Usage:
+    # Default (Gemini)
     uv run python examples/basic_agent.py
+
+    # OpenAI
+    uv run python examples/basic_agent.py --provider openai
+
+    # Anthropic Claude
+    uv run python examples/basic_agent.py --provider anthropic
+
+    # Local Ollama
+    uv run python examples/basic_agent.py --provider ollama
 """
 
+import argparse
 import asyncio
 import os
 import sys
@@ -29,106 +52,82 @@ from skill_framework.agent import AgentBuilder
 from skill_framework.integration.adk_adapter import ADKAdapter
 
 
-async def run_agent() -> None:
+def create_model(provider: str, model_name: str | None = None):
+    """
+    Create an ADK-compatible model based on provider.
+
+    Args:
+        provider: Provider name (gemini, openai, anthropic, bedrock, ollama)
+        model_name: Optional model name override
+
+    Returns:
+        ADK-compatible model (string or wrapper instance)
+    """
+    if provider == "gemini":
+        # Native Gemini - just return the model string
+        return model_name or "gemini-2.0-flash"
+
+    elif provider == "openai":
+        from google.adk.models.lite_llm import LiteLlm
+        model = model_name or "gpt-4o"
+        return LiteLlm(model=f"openai/{model}")
+
+    elif provider == "anthropic":
+        from google.adk.models.lite_llm import LiteLlm
+        model = model_name or "claude-3-5-sonnet-20241022"
+        return LiteLlm(model=f"anthropic/{model}")
+
+    elif provider == "bedrock":
+        from google.adk.models.lite_llm import LiteLlm
+        model = model_name or "anthropic.claude-3-sonnet-20240229-v1:0"
+        return LiteLlm(model=f"bedrock/{model}")
+
+    elif provider == "azure":
+        from google.adk.models.lite_llm import LiteLlm
+        if not model_name:
+            raise ValueError("Azure requires --model to specify deployment name")
+        return LiteLlm(model=f"azure/{model_name}")
+
+    elif provider == "ollama":
+        # Ollama uses LiteLLM with ollama_chat prefix
+        from google.adk.models.lite_llm import LiteLlm
+        model = model_name or "llama3.2:latest"
+        return LiteLlm(model=f"ollama_chat/{model}")
+
+    else:
+        raise ValueError(f"Unknown provider: {provider}")
+
+
+async def run_agent(provider: str, model_name: str | None = None) -> None:
     """Run an interactive agent with skill support."""
     skills_dir = Path(__file__).parent.parent / "skills"
 
     print("=" * 60)
-    print("Skill Framework Agent - Google ADK")
+    print(f"Skill Framework Agent - {provider.upper()}")
     print("=" * 60)
 
+    # Create model based on provider
+    model = create_model(provider, model_name)
+    print(f"\nUsing model: {model}")
+
     # Create adapter and builder
-    adapter = ADKAdapter(model="gemini-2.0-flash", app_name="skill_demo")
+    adapter = ADKAdapter(model=model, app_name="skill_demo")
     builder = AgentBuilder(skills_directory=skills_dir)
 
-    # Create session first (needed by skill_tool closure)
-    session_id = builder.create_session("demo-session")
-
-    # Create ADK-compatible skill tool using the framework's SkillMetaTool
-    # This achieves progressive disclosure: metadata in docstring, full content on-demand
-    def create_skill_tool(skill_meta_tool, conversation_manager, sess_id):
-        """Factory to create skill_tool with dynamic docstring from metadata."""
-
-        # Build skill list dynamically from loaded metadata (NOT hardcoded)
-        skill_list = "\n".join(
-            f"        - {name}: {meta.description}"
-            for name, meta in skill_meta_tool.skills_metadata.items()
-        )
-
-        def skill_tool(skill_name: str) -> str:
-            """Activate a skill - docstring replaced dynamically."""
-            # Progressive disclosure: load full content ON-DEMAND
-            try:
-                skill_content = skill_meta_tool.loader.load_skill(skill_name)
-                metadata = skill_meta_tool.skills_metadata.get(skill_name)
-
-                if not metadata:
-                    available = list(skill_meta_tool.skills_metadata.keys())
-                    return f"Skill '{skill_name}' not found. Available: {available}"
-
-                # Track activation
-                conversation_manager.activate_skill(sess_id, skill_name)
-                print(f"\n[Skill '{skill_name}' activated - loaded on-demand]")
-
-                # Return full instructions (loaded on-demand, not at startup)
-                return f"""# Skill Activated: {skill_name} (v{metadata.version})
-
-{skill_content.instructions}
-
-This skill remains active. Apply these instructions to related requests."""
-            except Exception as e:
-                return f"Error activating skill '{skill_name}': {e}"
-
-        # Dynamically set docstring with current skill metadata
-        skill_tool.__doc__ = f"""Activate a specialized skill based on user intent.
-
-IMPORTANT: Call this automatically when user's request matches a skill's purpose.
-Do NOT wait for explicit activation - proactively match intent to skills.
-
-Available skills:
-{skill_list}
-
-Args:
-    skill_name: Name of skill to activate.
-
-Returns:
-    Skill instructions to follow for the conversation."""
-
-        return skill_tool
-
-    skill_tool = create_skill_tool(
-        builder.skill_meta_tool,
-        builder.conversation_manager,
-        session_id,
+    # Create skill-enabled agent (all wiring handled automatically)
+    agent = builder.create_agent(
+        adapter=adapter,
+        name="skill_agent",
+        instruction="You are a helpful assistant with access to skills.",
     )
-
-    # Build system prompt with skill metadata
-    base_instruction = """You are a helpful assistant with access to skills.
-
-IMPORTANT: Proactively activate skills based on user intent:
-- When a user's request matches a skill's purpose, activate that skill immediately
-- Do NOT wait for the user to explicitly say "activate" or "use" a skill
-- Match the user's intent to available skill descriptions
-
-Once a skill is activated, it remains active - continue following its instructions for all related requests."""
-
-    system_prompt = builder.build_system_prompt(base_instruction)
 
     # Show available skills
     print("\nAvailable skills:")
-    for name, metadata in builder.skill_meta_tool.skills_metadata.items():
-        print(f"  - {name}: {metadata.description}")
+    for name, description in agent.available_skills.items():
+        print(f"  - {name}: {description}")
 
     print("\nType 'quit' to exit")
     print("-" * 60)
-
-    # Create the ADK agent with Skill tool as a callable function
-    adapter.create_agent(
-        name="skill_agent",
-        instruction=system_prompt,
-        description="An agent that can activate and use skills",
-        tools=[skill_tool],  # ADK uses callable functions as tools
-    )
 
     # Interactive loop
     while True:
@@ -145,37 +144,55 @@ Once a skill is activated, it remains active - continue following its instructio
             print("Goodbye!")
             break
 
-        # Add user message
-        builder.add_user_message(session_id, user_input)
-
-        # Send to LLM
+        # Send message and get response (message tracking handled automatically)
         try:
-            response = await adapter.send_message(
-                messages=builder.get_messages_for_api(session_id),
-                system_prompt=system_prompt,
-                tools=[],  # Tools are registered with the agent, not per-message
-                session_id=session_id,
-            )
+            response = await agent.chat(user_input)
+            print(f"\nAgent: {response}")
         except Exception as e:
             print(f"\nError: {e}")
-            continue
 
-        # Note: ADK handles tool calls automatically via the skill_tool function
-        # The function is called by ADK and its return value is used in the conversation
 
-        # Print response
-        if response.content:
-            print(f"\nAgent: {response.content}")
-            builder.add_assistant_message(session_id, response.content)
+def check_credentials(provider: str) -> bool:
+    """Check if required credentials are available for the provider."""
+    required_vars = {
+        "gemini": ["GOOGLE_API_KEY"],
+        "openai": ["OPENAI_API_KEY"],
+        "anthropic": ["ANTHROPIC_API_KEY"],
+        "bedrock": ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"],
+        "azure": ["AZURE_API_KEY", "AZURE_API_BASE"],
+        "ollama": [],  # No credentials needed for local Ollama
+    }
+
+    missing = [var for var in required_vars.get(provider, []) if not os.environ.get(var)]
+    if missing:
+        print(f"Error: Missing environment variables for {provider}: {', '.join(missing)}")
+        return False
+    return True
 
 
 def main() -> None:
     """Entry point."""
-    if not os.environ.get("GOOGLE_API_KEY"):
-        print("Error: GOOGLE_API_KEY environment variable required")
+    parser = argparse.ArgumentParser(
+        description="Run skill-enabled agent with multiple LLM providers"
+    )
+    parser.add_argument(
+        "--provider",
+        choices=["gemini", "openai", "anthropic", "bedrock", "azure", "ollama"],
+        default="gemini",
+        help="LLM provider to use (default: gemini)",
+    )
+    parser.add_argument(
+        "--model",
+        type=str,
+        default=None,
+        help="Model name override (provider-specific)",
+    )
+    args = parser.parse_args()
+
+    if not check_credentials(args.provider):
         sys.exit(1)
 
-    asyncio.run(run_agent())
+    asyncio.run(run_agent(args.provider, args.model))
 
 
 if __name__ == "__main__":

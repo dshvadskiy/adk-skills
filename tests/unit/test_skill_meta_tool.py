@@ -99,7 +99,7 @@ class TestSkillMetaTool:
 
         assert "hello-world" in section
         assert "A simple test skill" in section
-        assert "Skill tool" in section
+        assert "Available Skills" in section
         assert "v1.0.0" in section
         assert "test" in section  # tags
         assert "example" in section

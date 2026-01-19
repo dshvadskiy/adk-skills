@@ -1,6 +1,7 @@
 """Base adapter interface for LLM integrations."""
 
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -23,6 +24,7 @@ class LLMResponse:
     stop_reason: Optional[str] = None
     usage: Optional[dict[str, int]] = None
     raw_response: Optional[Any] = None
+    is_streaming: bool = False
 
     @property
     def has_tool_calls(self) -> bool:
@@ -117,3 +119,29 @@ class BaseLLMAdapter(ABC):
             Messages in provider-specific format
         """
         return messages
+
+    async def send_message_streaming(
+        self,
+        messages: list[dict[str, Any]],
+        system_prompt: str,
+        tools: list[dict[str, Any]],
+        **kwargs: Any,
+    ) -> AsyncIterator[LLMResponse]:
+        """
+        Stream responses from the LLM.
+
+        Default implementation yields a single non-streaming response.
+        Override for true streaming support.
+
+        Args:
+            messages: List of conversation messages
+            system_prompt: System instruction
+            tools: List of tool definitions
+            **kwargs: Provider-specific options
+
+        Yields:
+            LLMResponse chunks with is_streaming=True for intermediate
+            chunks, and is_streaming=False for the final response.
+        """
+        response = await self.send_message(messages, system_prompt, tools, **kwargs)
+        yield response

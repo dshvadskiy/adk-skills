@@ -40,7 +40,7 @@ class TestSkillLoader:
 
         # Instructions (markdown body) parsed
         assert "# Hello World Skill" in result.instructions
-        assert "When this skill is activated" in result.instructions
+        assert "greeting-related requests" in result.instructions
 
         # Raw content preserved
         assert result.raw_content.startswith("---")

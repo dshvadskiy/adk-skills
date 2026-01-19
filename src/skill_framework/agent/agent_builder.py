@@ -1,11 +1,14 @@
 """Agent builder for constructing agents with Skills support."""
 
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, AsyncIterator, Callable, Optional, TYPE_CHECKING
 
 from ..core.skill_meta_tool import SkillMetaTool, SkillActivationResult
 from ..tools.tool_registry import ToolRegistry
 from .conversation import ConversationManager
+
+if TYPE_CHECKING:
+    from ..integration.base_adapter import BaseLLMAdapter
 
 
 class AgentBuilder:
@@ -264,3 +267,246 @@ class AgentBuilder:
         """Deactivate a skill in the session."""
         self.skill_meta_tool.deactivate_skill(skill_name)
         self.conversation_manager.deactivate_skill(session_id, skill_name)
+
+    # =========================================================================
+    # Adapter Integration - Simplified Agent Creation
+    # =========================================================================
+
+    def create_agent(
+        self,
+        adapter: "BaseLLMAdapter",
+        name: str = "skill_agent",
+        instruction: str = "You are a helpful assistant.",
+        description: str = "",
+        session_id: Optional[str] = None,
+    ) -> "SkillEnabledAgent":
+        """
+        Create a skill-enabled agent with all wiring handled automatically.
+
+        This is the main entry point for creating agents. It:
+        - Creates the skill tool with dynamic docstring
+        - Builds the system prompt with skill metadata
+        - Configures the adapter with the agent
+        - Sets up conversation tracking
+
+        Args:
+            adapter: LLM adapter (e.g., ADKAdapter)
+            name: Agent name
+            instruction: Base system instruction
+            description: Agent description
+            session_id: Optional session ID (auto-generated if not provided)
+
+        Returns:
+            SkillEnabledAgent for interaction
+
+        Example:
+            builder = AgentBuilder(skills_directory=skills_dir)
+            agent = builder.create_agent(
+                adapter=ADKAdapter(model="gemini-2.0-flash"),
+                instruction="You are a helpful assistant."
+            )
+            async for response in agent.chat("Hello"):
+                print(response)
+        """
+        # Generate session ID if not provided
+        if session_id is None:
+            import uuid
+            session_id = f"session-{uuid.uuid4().hex[:8]}"
+
+        # Create session
+        self.create_session(session_id)
+
+        # Build skill tool with dynamic docstring
+        skill_tool = self._create_skill_tool(session_id)
+
+        # Build system prompt with skill awareness
+        system_prompt = self._build_skill_aware_prompt(instruction)
+
+        # Configure adapter with agent
+        adapter.create_agent(
+            name=name,
+            instruction=system_prompt,
+            description=description or f"{name} with skill support",
+            tools=[skill_tool],
+        )
+
+        return SkillEnabledAgent(
+            builder=self,
+            adapter=adapter,
+            session_id=session_id,
+            system_prompt=system_prompt,
+        )
+
+    def _create_skill_tool(self, session_id: str) -> Callable[[str], str]:
+        """
+        Create ADK-compatible skill tool with dynamic docstring.
+
+        The tool's docstring contains skill metadata for LLM discovery.
+        Full skill content is loaded on-demand when activated (progressive disclosure).
+
+        Args:
+            session_id: Session ID for tracking activations
+
+        Returns:
+            Callable skill tool function
+        """
+        skill_meta_tool = self.skill_meta_tool
+        conversation_manager = self.conversation_manager
+
+        # Build skill list from metadata
+        skill_list = "\n".join(
+            f"        - {name}: {meta.description}"
+            for name, meta in skill_meta_tool.skills_metadata.items()
+        )
+
+        def skill_tool(skill_name: str) -> str:
+            """Activate a skill - docstring replaced dynamically."""
+            try:
+                # Progressive disclosure: load full content ON-DEMAND
+                skill_content = skill_meta_tool.loader.load_skill(skill_name)
+                metadata = skill_meta_tool.skills_metadata.get(skill_name)
+
+                if not metadata:
+                    available = list(skill_meta_tool.skills_metadata.keys())
+                    return f"Skill '{skill_name}' not found. Available: {available}"
+
+                # Track activation
+                conversation_manager.activate_skill(session_id, skill_name)
+
+                # Return full instructions (loaded on-demand, not at startup)
+                return f"""# Skill Activated: {skill_name} (v{metadata.version})
+
+{skill_content.instructions}
+
+This skill remains active. Apply these instructions to related requests."""
+            except Exception as e:
+                return f"Error activating skill '{skill_name}': {e}"
+
+        # Set dynamic docstring with skill metadata
+        skill_tool.__doc__ = f"""Activate a specialized skill based on user intent.
+
+IMPORTANT: Call this automatically when user's request matches a skill's purpose.
+Do NOT wait for explicit activation - proactively match intent to skills.
+
+Available skills:
+{skill_list}
+
+Args:
+    skill_name: Name of skill to activate.
+
+Returns:
+    Skill instructions to follow for the conversation."""
+
+        return skill_tool
+
+    def _build_skill_aware_prompt(self, base_instruction: str) -> str:
+        """
+        Build system prompt with skill awareness instructions.
+
+        Args:
+            base_instruction: User's base instruction
+
+        Returns:
+            Complete system prompt with skill metadata and usage guidelines
+        """
+        skill_awareness = """
+
+IMPORTANT: Proactively activate skills based on user intent:
+- When a user's request matches a skill's purpose, activate that skill immediately
+- Do NOT wait for the user to explicitly say "activate" or "use" a skill
+- Match the user's intent to available skill descriptions
+
+Once a skill is activated, it remains active - continue following its instructions for all related requests."""
+
+        return self.build_system_prompt(base_instruction + skill_awareness)
+
+
+class SkillEnabledAgent:
+    """
+    High-level agent interface for skill-enabled conversations.
+
+    Provides a simple API for interacting with the agent:
+    - chat(): Send messages and get responses
+    - get_active_skills(): Check which skills are active
+    """
+
+    def __init__(
+        self,
+        builder: AgentBuilder,
+        adapter: "BaseLLMAdapter",
+        session_id: str,
+        system_prompt: str,
+    ):
+        self._builder = builder
+        self._adapter = adapter
+        self._session_id = session_id
+        self._system_prompt = system_prompt
+
+    @property
+    def session_id(self) -> str:
+        """Get the session ID."""
+        return self._session_id
+
+    @property
+    def active_skills(self) -> list[str]:
+        """Get list of currently active skills."""
+        return self._builder.get_active_skills(self._session_id)
+
+    @property
+    def available_skills(self) -> dict[str, str]:
+        """Get available skills with descriptions."""
+        return {
+            name: meta.description
+            for name, meta in self._builder.skill_meta_tool.skills_metadata.items()
+        }
+
+    async def chat(self, message: str) -> str:
+        """
+        Send a message and get a response.
+
+        Handles message tracking automatically.
+
+        Args:
+            message: User message
+
+        Returns:
+            Agent response text
+
+        Example:
+            response = await agent.chat("Say hello in Spanish")
+            print(response)
+        """
+        # Track user message
+        self._builder.add_user_message(self._session_id, message)
+
+        # Send to LLM
+        response = await self._adapter.send_message(
+            messages=self._builder.get_messages_for_api(self._session_id),
+            system_prompt=self._system_prompt,
+            tools=[],  # Tools registered with agent, not per-message
+            session_id=self._session_id,
+        )
+
+        # Track assistant response
+        if response.content:
+            self._builder.add_assistant_message(self._session_id, response.content)
+
+        return response.content or ""
+
+    async def chat_stream(self, message: str) -> AsyncIterator[str]:
+        """
+        Send a message and stream the response.
+
+        Note: Streaming support depends on adapter implementation.
+        Falls back to non-streaming if not supported.
+
+        Args:
+            message: User message
+
+        Yields:
+            Response text chunks
+        """
+        # For now, fall back to non-streaming
+        # TODO: Implement streaming when adapter supports it
+        response = await self.chat(message)
+        yield response

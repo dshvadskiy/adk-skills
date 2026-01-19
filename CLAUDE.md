@@ -50,9 +50,81 @@ network_access: false
 Full markdown instructions loaded on-demand...
 ```
 
-## Development
+## Development Workflow
 
-### Project Structure
+### Task Completion Checklist
+
+**A task is only complete when ALL checks pass:**
+
+```bash
+# 1. Run all tests
+uv run pytest tests/ -v
+
+# 2. Type checking
+uv run mypy src/
+
+# 3. Linting
+uv run ruff check src/ tests/
+
+# 4. Formatting verification
+uv run ruff format --check src/ tests/
+```
+
+### Recommended Tools (add to pyproject.toml dev dependencies)
+
+```toml
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=4.1",      # Coverage reporting
+    "mypy>=1.8",            # Static type checking
+    "ruff>=0.3",            # Fast linter + formatter (replaces flake8, black, isort)
+    "types-PyYAML>=6.0",    # Type stubs for PyYAML
+]
+```
+
+### Tool Configuration (add to pyproject.toml)
+
+```toml
+[tool.mypy]
+python_version = "3.10"
+strict = true
+warn_return_any = true
+warn_unused_ignores = true
+exclude = ["tests/"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "SIM"]
+ignore = ["E501"]  # Line length handled by formatter
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-v --tb=short"
+```
+
+### Quick Validation Command
+
+```bash
+# Run all checks in sequence (copy-paste friendly)
+uv run pytest tests/ && uv run mypy src/ && uv run ruff check src/ tests/ && uv run ruff format --check src/ tests/
+```
+
+### Why These Tools?
+
+| Tool | Purpose | Why Recommended |
+|------|---------|-----------------|
+| **pytest** | Testing | Already in use, excellent async support |
+| **mypy** | Type checking | Catches type errors before runtime, strict mode for quality |
+| **ruff** | Linting + Formatting | 10-100x faster than flake8/black, single tool for both |
+| **pytest-cov** | Coverage | Ensures adequate test coverage |
+
+## Project Structure
 ```
 src/skill_framework/
 ├── core/           # SkillMetaTool, SkillLoader, MessageInjector
@@ -64,9 +136,13 @@ tests/unit/         # Unit tests - minimal mocking, real fixtures
 
 ### Commands
 ```bash
-uv sync --dev
-uv run pytest tests/         # Run all tests
-uv run pytest tests/unit/    # Unit tests only
+uv sync --dev                           # Install dependencies
+uv run pytest tests/                    # Run all tests
+uv run pytest tests/unit/               # Unit tests only
+uv run pytest tests/ --cov=src/         # Tests with coverage
+uv run mypy src/                        # Type check
+uv run ruff check src/ tests/           # Lint
+uv run ruff format src/ tests/          # Format code
 ```
 
 ## Testing Philosophy

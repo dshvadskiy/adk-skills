@@ -84,7 +84,7 @@ class TestMessageInjector:
         # Content includes skill instructions and context
         assert "# hello-world Skill" in msg["content"]
         assert "Hello World Skill" in msg["content"]
-        assert "When this skill is activated" in msg["content"]
+        assert "greeting-related requests" in msg["content"]
         assert "**Version:** 1.0.0" in msg["content"]
         assert "**Author:** ADK Skills Team" in msg["content"]
         assert "**Tags:** test, example" in msg["content"]
