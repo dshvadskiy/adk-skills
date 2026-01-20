@@ -36,12 +36,17 @@ from pathlib import Path
 warnings.filterwarnings("ignore", message=".*EXPERIMENTAL.*")
 warnings.filterwarnings("ignore", message=".*non-text parts.*")
 
+# Configure LiteLLM to drop unsupported parameters for Bedrock
+import litellm
+litellm.drop_params = True
+
 # Add src to path for development
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 # Load .env file
 from dotenv import load_dotenv
-load_dotenv(Path(__file__).parent/ ".env")
+load_dotenv(Path(__file__).parent.parent / ".env")
+print(f"Loading .env file from {Path(__file__).parent.parent / ".env"}")
 
 from skill_framework.agent import AgentBuilder
 from skill_framework.integration.adk_adapter import ADKAdapter
@@ -74,9 +79,20 @@ def create_model(provider: str, model_name: str | None = None):
 
     elif provider == "bedrock":
         from google.adk.models.lite_llm import LiteLlm
-        model = model_name or os.getenv("MODEL_NAME", "anthropic.claude-3-5-sonnet-20241022-v2:0")
-        model_id = os.getenv("MODEL_ID", model)  # Default to model name if not specified
-        return LiteLlm(model=f"bedrock/{model}", model_id=model_id)
+        # Get model ID - prefer MODEL_ID, then MODEL_NAME, then default
+        model_id = model_name or os.getenv("MODEL_ID") or os.getenv("MODEL_NAME", "anthropic.claude-3-5-sonnet-20241022-v2:0")
+        
+        # Strip any existing bedrock/ prefix
+        model_id = model_id.replace("bedrock/", "")
+        
+        # If it's an ARN or inference profile, use converse route
+        if "arn:aws:bedrock" in model_id or "inference-profile" in model_id:
+            model_str = f"bedrock/converse/{model_id}"
+        else:
+            model_str = f"bedrock/{model_id}"
+        
+        print(f"Using model: {model_str}")
+        return LiteLlm(model=model_str)
 
     elif provider == "azure":
         from google.adk.models.lite_llm import LiteLlm

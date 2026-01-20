@@ -6,14 +6,19 @@ This specification defines a production implementation of the Skills meta-tool a
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| SkillLoader | ✅ Basic | Parses SKILL.md, returns SkillMetadata/SkillContent |
+| SkillLoader | ✅ Complete | Parses SKILL.md, returns SkillMetadata/SkillContent |
 | SkillMetadata | ✅ Complete | Dataclass with all frontmatter fields |
 | SkillContent | ✅ Complete | Dataclass for full skill content |
-| SkillMetaTool | ⏳ Pending | Core meta-tool orchestration |
-| MessageInjector | ⏳ Pending | Two-message pattern |
-| ContextManager | ⏳ Pending | Execution context modification |
-| PermissionManager | ⏳ Pending | Tool permission scoping |
-| AgentBuilder | ⏳ Pending | Google ADK integration |
+| SkillMetaTool | ✅ Complete | Core meta-tool orchestration (27 tests) |
+| MessageInjector | ✅ Complete | Two-message pattern (26 tests) |
+| ContextManager | ✅ Complete | Execution context modification (17 tests) |
+| PermissionManager | ✅ Complete | Tool permission scoping (21 tests) |
+| AgentBuilder | ✅ Complete | Google ADK integration (31 tests) |
+| ConversationManager | ✅ Complete | Conversation state management (30 tests) |
+| ToolRegistry | ✅ Complete | Tool management (14 tests) |
+| ADKAdapter | ✅ Complete | Google ADK adapter (13 tests passing) |
+| Integration Tests | ✅ Complete | End-to-end + ADK integration (25 tests) |
+| Skills | ✅ Dynamic | Auto-discovered from skills/ directory |
 
 Table of Contents
 

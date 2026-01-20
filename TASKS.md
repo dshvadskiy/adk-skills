@@ -172,14 +172,21 @@
 | Conversation handling | ✅ | adk_adapter.py | ADK conversation API |
 | Session management | ✅ | adk_adapter.py | Auto session creation |
 | Integration tests | ✅ | test_adk_integration.py | 13 tests (3 require credentials) |
+| Multi-provider support | ✅ | basic_agent.py | LiteLLM: OpenAI, Anthropic, Bedrock, Azure, Vertex |
 
-### 5.3 Optional Adapters ⏳
+### 5.3 Optional Adapters (Not Needed) ✅
 
-| Task | Status | File | Notes |
-|------|--------|------|-------|
-| BedrockAdapter | ⏳ | bedrock_adapter.py | AWS Bedrock |
-| VertexAdapter | ⏳ | vertex_adapter.py | GCP Vertex AI |
-| AnthropicAdapter | ⏳ | anthropic_adapter.py | Direct API |
+> **Note**: ADK's LiteLLM integration already provides multi-provider support.
+> No need for separate adapter implementations - use `LiteLlm(model="provider/model")`.
+
+| Provider | Status | Implementation | Notes |
+|----------|--------|----------------|-------|
+| Gemini | ✅ | Native ADK | Default, best performance |
+| OpenAI | ✅ | LiteLLM | `LiteLlm(model="openai/gpt-4o")` |
+| Anthropic | ✅ | LiteLLM | `LiteLlm(model="anthropic/claude-3-5-sonnet")` |
+| Bedrock | ✅ | LiteLLM | `LiteLlm(model="bedrock/model-id")` |
+| Azure | ✅ | LiteLLM | `LiteLlm(model="azure/deployment")` |
+| Vertex AI | ✅ | LiteLLM | `LiteLlm(model="vertex_ai/model")` |
 
 ---
 
@@ -192,14 +199,16 @@
 | Template SKILL.md | ⏳ | skills/_template/SKILL.md | Starter template |
 | Template README.md | ⏳ | skills/_template/README.md | Usage guide |
 
-### 6.2 Example Skills ⏳
+### 6.2 Example Skills ✅
+
+> **Note**: Skills are discovered dynamically via `SkillMetaTool.load_all_metadata()`.
+> Any SKILL.md file in the skills/ directory is automatically available.
+> No need to track individual skills in this task list.
 
 | Task | Status | File | Notes |
 |------|--------|------|-------|
 | hello-world skill | ✅ | skills/hello-world/SKILL.md | Test skill |
-| fraud-analysis skill | ⏳ | skills/fraud-analysis/SKILL.md | Example domain skill |
-| report-generation skill | ⏳ | skills/report-generation/SKILL.md | Example domain skill |
-| data-validation skill | ⏳ | skills/data-validation/SKILL.md | Example domain skill |
+| brainstorming skill | ✅ | skills/brainstorming/SKILL.md | Design exploration skill |
 
 ---
 
@@ -304,10 +313,10 @@
 | 2. Core | 35 | 35 | 100% | |
 | 3. Agent | 17 | 20 | 85% | Session management optional |
 | 4. Tools | 5 | 5 | 100% | Built-in tools optional |
-| 5. ADK | 11 | 11 | 100% | Base + ADK adapters complete |
-| 6. Skills | 1 | 6 | 17% | |
+| 5. ADK | 13 | 13 | 100% | ADK + LiteLLM multi-provider support |
+| 6. Skills | 4 | 4 | 100% | Dynamic discovery via load_all_metadata() |
 | 7. Testing | 10 | 10 | 100% | 154 tests passing |
 | 8. Scripts | 0 | 3 | 0% | Optional |
 | 9. Docs | 0 | 4 | 0% | |
 | 10. Deploy | 0 | 4 | 0% | Optional |
-| **Total** | **83** | **102** | **81%** | Core + ADK integration complete |
+| **Total** | **88** | **102** | **86%** | Core + multi-provider integration complete |
