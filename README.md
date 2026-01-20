@@ -1,5 +1,59 @@
 # ADK Skills Framework
 
-Skills meta-tool architecture for Google ADK agents.
+Skills meta-tool architecture for Google ADK agents with progressive disclosure, two-message injection pattern, and dynamic permission scoping.
 
-See [SPEC.md](SPEC.md) for full specification.
+## Quick Start
+
+### Try the Chat UI
+
+Experience the Skills framework in action with our web-based chat interface:
+
+```bash
+# Install dependencies
+uv sync --extra web
+
+# Run the chat server
+./run_chat.sh
+
+# Or manually:
+uv run python examples/chat_server.py
+```
+
+Then open `http://localhost:8000` in your browser.
+
+See [`examples/CHAT_UI.md`](examples/CHAT_UI.md) for detailed documentation.
+
+### Command Line Agent
+
+Run the basic CLI agent:
+
+```bash
+uv sync
+uv run python examples/basic_agent.py
+```
+
+## Documentation
+
+- **[SPEC.md](SPEC.md)** - Complete architectural specification with pseudocode
+- **[CHAT_UI.md](examples/CHAT_UI.md)** - Web chat interface documentation
+- **[AGENTS.md](AGENTS.md)** - Development guidelines for Claude Code
+- **[TASKS.md](TASKS.md)** - Project task tracking
+
+## Features
+
+- **Progressive Disclosure** - Load skill content only when needed
+- **Two-Message Pattern** - Visible metadata + hidden instructions (isMeta=true)
+- **Dynamic Permissions** - Fine-grained tool access control per skill
+- **LLM-Based Selection** - Let the LLM decide which skill to activate
+- **Multi-Provider Support** - Works with Bedrock, OpenAI, Anthropic, Gemini, Azure
+
+## Project Status
+
+Currently in active development. Core framework is implemented with:
+- ✅ Skill loading and parsing
+- ✅ Message injection system
+- ✅ Context management
+- ✅ Agent builder and ADK integration
+- ✅ Web-based chat UI
+- 🚧 Permission system (in progress)
+- 🚧 Comprehensive test coverage (in progress)

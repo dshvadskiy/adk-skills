@@ -181,3 +181,11 @@ Message 2 (hidden from UI, sent to LLM):
 ### Agent Framework
 - **Google ADK** (Agent Development Kit) - primary agent framework
 - Deployment targets: AWS Bedrock, GCP Vertex AI, Anthropic API
+
+
+## Tools and MCP Servers
+
+- `uv` - Python environment manager
+- `context7 mcp` - Use to lookup information about frameworks and tools tools you are using
+- `sayft-dev mcp` - Use to find search code, find method, class, file, etc. 
+- `chrome-devtools mcp` - Use to debug and test web applications

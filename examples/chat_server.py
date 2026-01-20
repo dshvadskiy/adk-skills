@@ -1,0 +1,472 @@
+#!/usr/bin/env python3
+"""FastAPI chat server for demonstrating Skills framework.
+
+Provides:
+- REST API for chat interactions
+- WebSocket support for real-time streaming
+- Skill activation visualization
+- Multiple LLM provider support
+
+Usage:
+    # Install web dependencies
+    uv sync --extra web
+
+    # Run server (default: Bedrock)
+    uv run python examples/chat_server.py
+
+    # Run with specific provider
+    uv run python examples/chat_server.py --provider openai
+
+    # Custom port
+    uv run python examples/chat_server.py --port 8080
+
+Then open http://localhost:8000 in your browser.
+"""
+
+import argparse
+import asyncio
+import json
+import os
+import sys
+import uuid
+import warnings
+from pathlib import Path
+from typing import Any
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+
+# Suppress ADK warnings
+warnings.filterwarnings("ignore", message=".*EXPERIMENTAL.*")
+warnings.filterwarnings("ignore", message=".*non-text parts.*")
+
+# Configure LiteLLM
+import litellm
+litellm.drop_params = True
+
+# Add src to path
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
+# Load environment
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).parent.parent / ".env")
+
+from skill_framework.agent import AgentBuilder
+from skill_framework.integration.adk_adapter import ADKAdapter
+
+
+# Request/Response models
+class ChatRequest(BaseModel):
+    message: str
+    session_id: str | None = None
+
+
+class ChatResponse(BaseModel):
+    response: str
+    session_id: str
+    active_skills: list[str]
+
+
+# Global state
+app = FastAPI(title="Skills Framework Chat")
+agent_instance = None
+builder_instance = None
+
+
+def create_model(provider: str, model_name: str | None = None):
+    """Create ADK-compatible model based on provider."""
+    if provider == "gemini":
+        return model_name or "gemini-2.0-flash"
+
+    elif provider == "openai":
+        from google.adk.models.lite_llm import LiteLlm
+        model = model_name or "gpt-4o"
+        return LiteLlm(model=f"openai/{model}")
+
+    elif provider == "anthropic":
+        from google.adk.models.lite_llm import LiteLlm
+        model = model_name or "claude-3-5-sonnet-20241022"
+        return LiteLlm(model=f"anthropic/{model}")
+
+    elif provider == "bedrock":
+        from google.adk.models.lite_llm import LiteLlm
+        model_id = model_name or os.getenv("MODEL_ID") or os.getenv("MODEL_NAME", "anthropic.claude-3-5-sonnet-20241022-v2:0")
+        model_id = model_id.replace("bedrock/", "")
+        
+        if "arn:aws:bedrock" in model_id or "inference-profile" in model_id:
+            model_str = f"bedrock/converse/{model_id}"
+        else:
+            model_str = f"bedrock/{model_id}"
+        
+        return LiteLlm(model=model_str)
+
+    elif provider == "azure":
+        from google.adk.models.lite_llm import LiteLlm
+        if not model_name:
+            raise ValueError("Azure requires model name")
+        return LiteLlm(model=f"azure/{model_name}")
+
+    else:
+        raise ValueError(f"Unknown provider: {provider}")
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize agent on startup."""
+    global agent_instance, builder_instance
+    
+    skills_dir = Path(__file__).parent.parent / "skills"
+    provider = os.getenv("LLM_PROVIDER", "bedrock")
+    model_name = os.getenv("MODEL_NAME")
+    
+    print(f"Initializing agent with provider: {provider}")
+    model = create_model(provider, model_name)
+    
+    adapter = ADKAdapter(model=model, app_name="skill_chat_demo")
+    builder_instance = AgentBuilder(skills_directory=skills_dir)
+    
+    agent_instance = builder_instance.create_agent(
+        adapter=adapter,
+        name="chat_agent",
+        instruction="You are a helpful assistant with access to skills. When appropriate, use skills to enhance your responses.",
+    )
+    
+    print(f"Agent initialized with {len(agent_instance.available_skills)} skills")
+
+
+@app.get("/", response_class=HTMLResponse)
+async def get_index():
+    """Serve the chat UI."""
+    html_file = Path(__file__).parent / "static" / "chat.html"
+    if html_file.exists():
+        return FileResponse(html_file)
+    
+    # Fallback inline HTML if static file doesn't exist
+    return HTMLResponse(content=get_inline_html())
+
+
+@app.get("/favicon.ico")
+async def get_favicon():
+    """Return empty favicon to prevent 404."""
+    return HTMLResponse(content="", status_code=204)
+
+
+@app.get("/api/skills")
+async def get_skills():
+    """Get available skills."""
+    if not agent_instance:
+        raise HTTPException(status_code=503, detail="Agent not initialized")
+    
+    return {
+        "skills": [
+            {"name": name, "description": desc}
+            for name, desc in agent_instance.available_skills.items()
+        ]
+    }
+
+
+@app.post("/api/chat", response_model=ChatResponse)
+async def chat(request: ChatRequest):
+    """Handle chat message via REST API."""
+    if not agent_instance:
+        raise HTTPException(status_code=503, detail="Agent not initialized")
+    
+    # Use agent's session_id (each agent has its own session)
+    # For multi-session support, we'd need to create separate agents per session
+    session_id = agent_instance.session_id
+    
+    try:
+        response = await agent_instance.chat(request.message)
+        
+        # Get active skills
+        active_skills = agent_instance.active_skills
+        
+        return ChatResponse(
+            response=response,
+            session_id=session_id,
+            active_skills=active_skills,
+        )
+    except Exception as e:
+        import traceback
+        print(f"Error in chat endpoint: {e}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.websocket("/ws/chat")
+async def websocket_chat(websocket: WebSocket):
+    """Handle chat via WebSocket for streaming responses."""
+    await websocket.accept()
+    session_id = agent_instance.session_id
+    
+    try:
+        while True:
+            # Receive message
+            data = await websocket.receive_text()
+            message_data = json.loads(data)
+            user_message = message_data.get("message", "")
+            
+            if not user_message:
+                continue
+            
+            # Send acknowledgment
+            await websocket.send_json({
+                "type": "ack",
+                "session_id": session_id,
+            })
+            
+            # Get response (for now, non-streaming)
+            try:
+                response = await agent_instance.chat(user_message)
+                
+                # Get active skills
+                active_skills = agent_instance.active_skills
+                
+                # Send response
+                await websocket.send_json({
+                    "type": "response",
+                    "content": response,
+                    "session_id": session_id,
+                    "active_skills": active_skills,
+                })
+                
+            except Exception as e:
+                await websocket.send_json({
+                    "type": "error",
+                    "error": str(e),
+                })
+    
+    except WebSocketDisconnect:
+        print(f"WebSocket disconnected for session {session_id}")
+
+
+def get_inline_html() -> str:
+    """Fallback inline HTML if static file doesn't exist."""
+    return """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Skills Framework Chat</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .container {
+            width: 90%;
+            max-width: 800px;
+            height: 90vh;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            display: flex;
+            flex-direction: column;
+        }
+        .header {
+            padding: 20px;
+            border-bottom: 1px solid #e5e7eb;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 16px 16px 0 0;
+        }
+        .header h1 { font-size: 24px; margin-bottom: 8px; }
+        .header p { font-size: 14px; opacity: 0.9; }
+        .skills-bar {
+            padding: 12px 20px;
+            background: #f9fafb;
+            border-bottom: 1px solid #e5e7eb;
+            font-size: 13px;
+            color: #6b7280;
+        }
+        .skill-tag {
+            display: inline-block;
+            background: #667eea;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 12px;
+            margin-right: 8px;
+            font-size: 12px;
+        }
+        .messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            background: #f9fafb;
+        }
+        .message {
+            margin-bottom: 16px;
+            display: flex;
+            gap: 12px;
+        }
+        .message.user { justify-content: flex-end; }
+        .message-content {
+            max-width: 70%;
+            padding: 12px 16px;
+            border-radius: 12px;
+            line-height: 1.5;
+        }
+        .message.user .message-content {
+            background: #667eea;
+            color: white;
+        }
+        .message.assistant .message-content {
+            background: white;
+            color: #1f2937;
+            border: 1px solid #e5e7eb;
+        }
+        .input-area {
+            padding: 20px;
+            border-top: 1px solid #e5e7eb;
+            background: white;
+            border-radius: 0 0 16px 16px;
+        }
+        .input-container {
+            display: flex;
+            gap: 12px;
+        }
+        input {
+            flex: 1;
+            padding: 12px 16px;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+        button {
+            padding: 12px 24px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+        }
+        button:hover { background: #5568d3; }
+        button:disabled { background: #9ca3af; cursor: not-allowed; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎯 Skills Framework Chat</h1>
+            <p>Demonstrating progressive skill activation</p>
+        </div>
+        <div class="skills-bar">
+            <span id="skills-label">Available skills: Loading...</span>
+            <span id="active-skills"></span>
+        </div>
+        <div class="messages" id="messages"></div>
+        <div class="input-area">
+            <div class="input-container">
+                <input type="text" id="message-input" placeholder="Type your message..." />
+                <button id="send-btn">Send</button>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let sessionId = null;
+        
+        async function loadSkills() {
+            const response = await fetch('/api/skills');
+            const data = await response.json();
+            document.getElementById('skills-label').textContent = 
+                `Available skills: ${data.skills.map(s => s.name).join(', ')}`;
+        }
+        
+        function addMessage(role, content) {
+            const messagesDiv = document.getElementById('messages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${role}`;
+            messageDiv.innerHTML = `<div class="message-content">${content}</div>`;
+            messagesDiv.appendChild(messageDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+        
+        function updateActiveSkills(skills) {
+            const activeSkillsDiv = document.getElementById('active-skills');
+            if (skills && skills.length > 0) {
+                activeSkillsDiv.innerHTML = skills.map(s => 
+                    `<span class="skill-tag">✓ ${s}</span>`
+                ).join('');
+            } else {
+                activeSkillsDiv.innerHTML = '';
+            }
+        }
+        
+        async function sendMessage() {
+            const input = document.getElementById('message-input');
+            const message = input.value.trim();
+            if (!message) return;
+            
+            input.value = '';
+            addMessage('user', message);
+            
+            const sendBtn = document.getElementById('send-btn');
+            sendBtn.disabled = true;
+            
+            try {
+                const response = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message, session_id: sessionId })
+                });
+                
+                const data = await response.json();
+                sessionId = data.session_id;
+                addMessage('assistant', data.response);
+                updateActiveSkills(data.active_skills);
+            } catch (error) {
+                addMessage('assistant', `Error: ${error.message}`);
+            } finally {
+                sendBtn.disabled = false;
+                input.focus();
+            }
+        }
+        
+        document.getElementById('send-btn').addEventListener('click', sendMessage);
+        document.getElementById('message-input').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendMessage();
+        });
+        
+        loadSkills();
+    </script>
+</body>
+</html>
+"""
+
+
+def main():
+    """Run the chat server."""
+    parser = argparse.ArgumentParser(description="Skills Framework Chat Server")
+    parser.add_argument("--host", default="0.0.0.0", help="Host to bind to")
+    parser.add_argument("--port", type=int, default=8000, help="Port to bind to")
+    parser.add_argument("--provider", choices=["gemini", "openai", "anthropic", "bedrock", "azure"],
+                       help="LLM provider (overrides .env)")
+    parser.add_argument("--model", help="Model name (overrides .env)")
+    args = parser.parse_args()
+    
+    # Set environment variables from args if provided
+    if args.provider:
+        os.environ["LLM_PROVIDER"] = args.provider
+    if args.model:
+        os.environ["MODEL_NAME"] = args.model
+    
+    import uvicorn
+    print(f"\n🚀 Starting Skills Framework Chat Server")
+    print(f"📍 Open http://localhost:{args.port} in your browser\n")
+    
+    uvicorn.run(app, host=args.host, port=args.port)
+
+
+if __name__ == "__main__":
+    main()
