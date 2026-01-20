@@ -7,14 +7,12 @@ Supports multiple LLM providers via ADK's model abstraction:
     - Anthropic Claude via LiteLLM
     - Amazon Bedrock models via LiteLLM
     - Azure OpenAI via LiteLLM
-    - Local Ollama models
 
 Requirements:
     - For Gemini: GOOGLE_API_KEY environment variable
     - For OpenAI: OPENAI_API_KEY environment variable
     - For Anthropic: ANTHROPIC_API_KEY environment variable
     - For Bedrock: AWS credentials configured
-    - For Ollama: Local Ollama server running
 
 Usage:
     # Default (Gemini)
@@ -25,9 +23,6 @@ Usage:
 
     # Anthropic Claude
     uv run python examples/basic_agent.py --provider anthropic
-
-    # Local Ollama
-    uv run python examples/basic_agent.py --provider ollama
 """
 
 import argparse
@@ -46,7 +41,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 # Load .env file
 from dotenv import load_dotenv
-load_dotenv(Path(__file__).parent.parent / ".env")
+load_dotenv(Path(__file__).parent/ ".env")
 
 from skill_framework.agent import AgentBuilder
 from skill_framework.integration.adk_adapter import ADKAdapter
@@ -57,7 +52,7 @@ def create_model(provider: str, model_name: str | None = None):
     Create an ADK-compatible model based on provider.
 
     Args:
-        provider: Provider name (gemini, openai, anthropic, bedrock, ollama)
+        provider: Provider name (gemini, openai, anthropic, bedrock, azure)
         model_name: Optional model name override
 
     Returns:
@@ -79,20 +74,15 @@ def create_model(provider: str, model_name: str | None = None):
 
     elif provider == "bedrock":
         from google.adk.models.lite_llm import LiteLlm
-        model = model_name or "anthropic.claude-3-sonnet-20240229-v1:0"
-        return LiteLlm(model=f"bedrock/{model}")
+        model = model_name or os.getenv("MODEL_NAME", "anthropic.claude-3-5-sonnet-20241022-v2:0")
+        model_id = os.getenv("MODEL_ID", model)  # Default to model name if not specified
+        return LiteLlm(model=f"bedrock/{model}", model_id=model_id)
 
     elif provider == "azure":
         from google.adk.models.lite_llm import LiteLlm
         if not model_name:
             raise ValueError("Azure requires --model to specify deployment name")
         return LiteLlm(model=f"azure/{model_name}")
-
-    elif provider == "ollama":
-        # Ollama uses LiteLLM with ollama_chat prefix
-        from google.adk.models.lite_llm import LiteLlm
-        model = model_name or "llama3.2:latest"
-        return LiteLlm(model=f"ollama_chat/{model}")
 
     else:
         raise ValueError(f"Unknown provider: {provider}")
@@ -158,9 +148,8 @@ def check_credentials(provider: str) -> bool:
         "gemini": ["GOOGLE_API_KEY"],
         "openai": ["OPENAI_API_KEY"],
         "anthropic": ["ANTHROPIC_API_KEY"],
-        "bedrock": ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"],
+        "bedrock": [],  # AWS credentials via boto3, MODEL_ID/MODEL_NAME optional with defaults
         "azure": ["AZURE_API_KEY", "AZURE_API_BASE"],
-        "ollama": [],  # No credentials needed for local Ollama
     }
 
     missing = [var for var in required_vars.get(provider, []) if not os.environ.get(var)]
@@ -177,9 +166,9 @@ def main() -> None:
     )
     parser.add_argument(
         "--provider",
-        choices=["gemini", "openai", "anthropic", "bedrock", "azure", "ollama"],
-        default="gemini",
-        help="LLM provider to use (default: gemini)",
+        choices=["gemini", "openai", "anthropic", "bedrock", "azure"],
+        default="bedrock",
+        help="LLM provider to use (default: bedrock)",
     )
     parser.add_argument(
         "--model",

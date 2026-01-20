@@ -82,3 +82,4 @@ pip-delete-this-directory.txt
 # Build artifacts
 *.manifest
 *.spec
+uv.lock

@@ -7,6 +7,8 @@ requires-python = ">=3.10"
 dependencies = [
     "google-adk>=0.1.0",
     "pyyaml>=6.0",
+    "litellm>=1.0.0",
+    "python-dotenv>=1.0.0",
 ]
 
 [project.optional-dependencies]
