@@ -601,12 +601,26 @@
         
         function updateActiveSkills(skills) {
             const activeSkillsDiv = document.getElementById('active-skills');
+            const availableSkillsDiv = document.getElementById('available-skills');
+            
             if (skills && skills.length > 0) {
+                // Show active skills
                 activeSkillsDiv.innerHTML = skills.map(s => 
                     `<span class="skill-tag active">✓ ${s}</span>`
                 ).join('');
+                
+                // Update available skills to exclude active ones
+                const activeSet = new Set(skills);
+                availableSkillsDiv.innerHTML = availableSkills
+                    .filter(s => !activeSet.has(s.name))
+                    .map(s => `<span class="skill-tag" title="${s.description}">${s.name}</span>`)
+                    .join('');
             } else {
+                // No active skills, show all available
                 activeSkillsDiv.innerHTML = '';
+                availableSkillsDiv.innerHTML = availableSkills.map(s => 
+                    `<span class="skill-tag" title="${s.description}">${s.name}</span>`
+                ).join('');
             }
         }
         
