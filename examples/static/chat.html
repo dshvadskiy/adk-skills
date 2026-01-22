@@ -450,6 +450,96 @@
             margin: 8px 0;
         }
 
+        .file-attachments {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid rgba(0, 0, 0, 0.1);
+        }
+
+        .message.user .file-attachments {
+            border-top-color: rgba(255, 255, 255, 0.3);
+        }
+
+        .file-attachment {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            background: rgba(102, 126, 234, 0.1);
+            border-radius: 8px;
+            margin-top: 8px;
+            transition: all 0.2s;
+        }
+
+        .message.user .file-attachment {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .file-attachment:hover {
+            background: rgba(102, 126, 234, 0.15);
+            transform: translateX(2px);
+        }
+
+        .message.user .file-attachment:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        .file-icon {
+            font-size: 24px;
+            flex-shrink: 0;
+        }
+
+        .file-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .file-name {
+            font-weight: 600;
+            font-size: 14px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .file-type {
+            font-size: 12px;
+            opacity: 0.7;
+            margin-top: 2px;
+        }
+
+        .download-btn {
+            padding: 6px 14px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s;
+            flex-shrink: 0;
+        }
+
+        .download-btn:hover {
+            background: #5568d3;
+            transform: translateY(-1px);
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+        }
+
+        .message.user .download-btn {
+            background: rgba(255, 255, 255, 0.3);
+            backdrop-filter: blur(10px);
+        }
+
+        .message.user .download-btn:hover {
+            background: rgba(255, 255, 255, 0.5);
+        }
+
         @media (max-width: 768px) {
             .container {
                 height: 100vh;
@@ -550,7 +640,7 @@
             }
         }
         
-        function addMessage(role, content) {
+        function addMessage(role, content, files = null) {
             clearEmptyState();
             
             const messagesDiv = document.getElementById('messages');
@@ -563,14 +653,60 @@
                 messageDiv.innerHTML = `<div class="message-content">${escapeHtml(content)}</div>`;
             } else {
                 const renderedContent = role === 'assistant' ? md.render(content) : escapeHtml(content);
+                let filesHtml = '';
+                
+                if (files && files.length > 0) {
+                    filesHtml = '<div class="file-attachments">';
+                    files.forEach(file => {
+                        const icon = getFileIcon(file.filename);
+                        const fileType = file.mime_type.split('/').pop().toUpperCase();
+                        filesHtml += `
+                            <div class="file-attachment">
+                                <div class="file-icon">${icon}</div>
+                                <div class="file-info">
+                                    <div class="file-name">${escapeHtml(file.filename)}</div>
+                                    <div class="file-type">${fileType}</div>
+                                </div>
+                                <a href="${file.url}" class="download-btn" download="${file.filename}">
+                                    ⬇️ Download
+                                </a>
+                            </div>
+                        `;
+                    });
+                    filesHtml += '</div>';
+                }
+                
                 messageDiv.innerHTML = `
                     <div class="message-avatar">${avatar}</div>
-                    <div class="message-content">${renderedContent}</div>
+                    <div class="message-content">${renderedContent}${filesHtml}</div>
                 `;
             }
             
             messagesDiv.appendChild(messageDiv);
             messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+        
+        function getFileIcon(filename) {
+            const ext = filename.split('.').pop().toLowerCase();
+            const iconMap = {
+                'pptx': '📊',
+                'ppt': '📊',
+                'pdf': '📄',
+                'docx': '📝',
+                'doc': '📝',
+                'xlsx': '📈',
+                'xls': '📈',
+                'zip': '🗜️',
+                'png': '🖼️',
+                'jpg': '🖼️',
+                'jpeg': '🖼️',
+                'gif': '🖼️',
+                'mp4': '🎬',
+                'mp3': '🎵',
+                'txt': '📋',
+                'csv': '📊',
+            };
+            return iconMap[ext] || '📎';
         }
         
         function showTypingIndicator() {
@@ -661,7 +797,7 @@
                 sessionId = data.session_id;
                 
                 hideTypingIndicator();
-                addMessage('assistant', data.response);
+                addMessage('assistant', data.response, data.files);
                 updateActiveSkills(data.active_skills);
                 
             } catch (error) {

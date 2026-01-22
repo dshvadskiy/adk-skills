@@ -33,6 +33,7 @@ import warnings
 from pathlib import Path
 from typing import Any
 
+import re
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -67,12 +68,38 @@ class ChatResponse(BaseModel):
     response: str
     session_id: str
     active_skills: list[str]
+    files: list[dict[str, str]] | None = None  # [{"filename": "x.pptx", "url": "/api/files/abc123", "mime_type": "..."}]
 
 
 # Global state
 app = FastAPI(title="Skills Framework Chat")
 agent_instance = None
 builder_instance = None
+file_storage: dict[str, Path] = {}
+
+
+def extract_file_outputs(response: str, session_id: str) -> list[dict[str, str]] | None:
+    """Extract file output markers from agent response."""
+    # Look for pattern: FILE_OUTPUT: {"path": "...", "filename": "...", "mime_type": "..."}
+    pattern = r'FILE_OUTPUT:\s*\{"path":\s*"([^"]+)",\s*"filename":\s*"([^"]+)",\s*"mime_type":\s*"([^"]+)"\}'
+    matches = re.findall(pattern, response)
+    
+    if not matches:
+        return None
+    
+    files = []
+    for path_str, filename, mime_type in matches:
+        file_path = Path(path_str)
+        if file_path.exists():
+            file_id = f"{session_id}_{uuid.uuid4().hex[:8]}"
+            file_storage[file_id] = file_path
+            files.append({
+                "filename": filename,
+                "url": f"/api/files/{file_id}",
+                "mime_type": mime_type,
+            })
+    
+    return files if files else None
 
 
 def create_model(provider: str, model_name: str | None = None):
@@ -130,7 +157,24 @@ async def startup_event():
     agent_instance = builder_instance.create_agent(
         adapter=adapter,
         name="chat_agent",
-        instruction="You are a helpful assistant with access to skills. When appropriate, use skills to enhance your responses.",
+        instruction="""You are a helpful assistant with access to skills and tools.
+
+CRITICAL INSTRUCTIONS:
+- When a user asks you to CREATE, GENERATE, or BUILD something, you MUST use the appropriate tools
+- DO NOT just describe what you would create - actually create it using tools
+- When a skill provides bash_tool, read_file, or write_file, USE THEM to accomplish tasks
+- After activating a skill, READ the instructions carefully and FOLLOW them exactly
+- If instructions say to use bash_tool, you MUST call bash_tool - do not skip this step
+
+Example of CORRECT behavior:
+User: "Create a presentation"
+You: *activates skill* → *calls bash_tool to run script* → "Done! Here's your file"
+
+Example of INCORRECT behavior:
+User: "Create a presentation"  
+You: *activates skill* → "Here's what the presentation contains..." ❌ NO FILE CREATED
+
+When appropriate, use skills to enhance your responses.""",
     )
     
     print(f"Agent initialized with {len(agent_instance.available_skills)} skills")
@@ -151,6 +195,23 @@ async def get_index():
 async def get_favicon():
     """Return empty favicon to prevent 404."""
     return HTMLResponse(content="", status_code=204)
+
+
+@app.get("/api/files/{file_id}")
+async def download_file(file_id: str):
+    """Download a generated file."""
+    if file_id not in file_storage:
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    file_path = file_storage[file_id]
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File no longer exists")
+    
+    return FileResponse(
+        path=file_path,
+        filename=file_path.name,
+        media_type="application/octet-stream"
+    )
 
 
 @app.get("/api/skills")
@@ -183,10 +244,14 @@ async def chat(request: ChatRequest):
         # Get active skills
         active_skills = agent_instance.active_skills
         
+        # Parse response for file outputs
+        files = extract_file_outputs(response, session_id)
+        
         return ChatResponse(
             response=response,
             session_id=session_id,
             active_skills=active_skills,
+            files=files,
         )
     except Exception as e:
         import traceback

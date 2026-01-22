@@ -1,11 +1,12 @@
 """Skill meta-tool for managing skill lifecycle."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any, Optional
 
+from .script_executor import ExecutionConstraints, ScriptExecutor
 from .skill_loader import SkillContent, SkillLoader, SkillMetadata
 
 
@@ -26,6 +27,7 @@ class SkillActivationResult:
     metadata_message: dict[str, Any]
     instruction_message: dict[str, Any]
     modified_context: dict[str, Any]
+    permissions_message: Optional[dict[str, Any]] = None
     error: Optional[str] = None
     error_details: Optional[dict[str, Any]] = None
 
@@ -156,7 +158,9 @@ class SkillMetaTool:
             return ""
 
         section = "\n## Available Skills\n\n"
-        section += "You have access to specialized skills for domain-specific tasks:\n\n"
+        section += (
+            "You have access to specialized skills for domain-specific tasks:\n\n"
+        )
 
         for name, metadata in self.skills_metadata.items():
             section += f"**{name}** (v{metadata.version})\n"
@@ -218,6 +222,12 @@ class SkillMetaTool:
             skill_content = self._load_skill_content(skill_name)
             metadata = self.skills_metadata[skill_name]
 
+            # Resolve {baseDir} variable in instructions
+            skill_directory = self.skills_dir / skill_name
+            resolved_instructions = self._resolve_basedir_variable(
+                skill_content.instructions, skill_directory
+            )
+
             # Step 3 & 4: Create messages using MessageInjector
             injector = MessageInjector()
             metadata_msg = injector.create_metadata_message(
@@ -226,9 +236,25 @@ class SkillMetaTool:
             )
             instruction_msg = injector.create_instruction_message(
                 skill_name=skill_name,
-                instructions=skill_content.instructions,
+                instructions=resolved_instructions,
                 metadata=metadata,
             )
+
+            # Step 4.5: Create permissions message if allowed_tools present
+            permissions_msg = None
+            if metadata.allowed_tools:
+                # Parse allowed_tools to get list
+                # Create temporary executor just to parse the tools
+                temp_executor = ScriptExecutor(
+                    skill_name=skill_name,
+                    skill_directory=self.skills_dir / skill_name,
+                    allowed_tools=metadata.allowed_tools,
+                )
+                parsed_tools = temp_executor.allowed_tools
+                permissions_msg = self._create_permissions_message(
+                    allowed_tools=parsed_tools,
+                    model=None,  # Model can be added to metadata if needed
+                )
 
             # Step 5: Modify execution context
             modified_context = self._modify_context_for_skill(
@@ -250,6 +276,7 @@ class SkillMetaTool:
                 metadata_message=metadata_msg,
                 instruction_message=instruction_msg,
                 modified_context=modified_context,
+                permissions_message=permissions_msg,
             )
 
         except Exception as e:
@@ -275,6 +302,34 @@ class SkillMetaTool:
 
         return content
 
+    def _resolve_basedir_variable(
+        self, instructions: str, skill_directory: Path
+    ) -> str:
+        """
+        Replace {baseDir} and {basedir} variables with absolute skill directory path.
+
+        Supports case-insensitive matching for flexibility.
+
+        Args:
+            instructions: Skill instructions with {baseDir} placeholders
+            skill_directory: Absolute path to skill directory
+
+        Returns:
+            Instructions with all {baseDir} occurrences replaced
+        """
+        import re
+
+        # Convert to absolute path string
+        base_dir_str = str(skill_directory.resolve())
+
+        # Replace both {baseDir} and {basedir} (case-insensitive)
+        # Use regex for case-insensitive replacement
+        resolved = re.sub(
+            r"\{basedir\}", base_dir_str, instructions, flags=re.IGNORECASE
+        )
+
+        return resolved
+
     def _modify_context_for_skill(
         self,
         skill_name: str,
@@ -285,6 +340,7 @@ class SkillMetaTool:
         Modify execution context based on skill requirements.
 
         This is where tool permissions are scoped per skill.
+        Creates ScriptExecutor if skill has scripts/ directory.
         """
         modified = dict(current_context)
 
@@ -299,7 +355,9 @@ class SkillMetaTool:
         # Apply execution constraints
         if metadata.max_execution_time:
             current_max = modified.get("max_execution_time", 999999)
-            modified["max_execution_time"] = min(current_max, metadata.max_execution_time)
+            modified["max_execution_time"] = min(
+                current_max, metadata.max_execution_time
+            )
 
         if metadata.max_memory:
             current_max = modified.get("max_memory", 999999)
@@ -312,6 +370,30 @@ class SkillMetaTool:
         # Track active skill
         modified["active_skill"] = skill_name
         modified["skill_version"] = metadata.version
+
+        # Create ScriptExecutor if skill has scripts/ directory
+        skill_directory = self.skills_dir / skill_name
+        scripts_dir = skill_directory / "scripts"
+
+        if scripts_dir.exists() and scripts_dir.is_dir():
+            # Create execution constraints from metadata
+            constraints = ExecutionConstraints(
+                max_execution_time=metadata.max_execution_time or 300,
+                max_memory=metadata.max_memory,
+                network_access=metadata.network_access,
+                working_directory=skill_directory,
+            )
+
+            # Create ScriptExecutor
+            script_executor = ScriptExecutor(
+                skill_name=skill_name,
+                skill_directory=skill_directory,
+                allowed_tools=metadata.allowed_tools,
+                constraints=constraints,
+            )
+
+            modified["script_executor"] = script_executor
+            modified["base_dir"] = str(skill_directory.resolve())
 
         return modified
 
@@ -337,6 +419,44 @@ class SkillMetaTool:
     def clear_cache(self) -> None:
         """Clear skill content cache."""
         self._skill_cache.clear()
+
+    def _create_permissions_message(
+        self,
+        allowed_tools: list[str],
+        model: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """
+        Create command_permissions message for execution context.
+
+        This matches Claude Skills implementation format:
+        {
+            "role": "user",
+            "content": {
+                "type": "command_permissions",
+                "allowedTools": ["Bash(python:*)", "Read", "Write"],
+                "model": "claude-opus-4-20250514"
+            }
+        }
+
+        Args:
+            allowed_tools: List of allowed tool patterns
+            model: Optional model identifier
+
+        Returns:
+            Permissions message dict
+        """
+        content: dict[str, Any] = {
+            "type": "command_permissions",
+            "allowedTools": allowed_tools,
+        }
+
+        if model:
+            content["model"] = model
+
+        return {
+            "role": "user",
+            "content": content,
+        }
 
     def _get_timestamp(self) -> str:
         """Get current timestamp in ISO format."""

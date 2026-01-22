@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Coding agent when working with code in this repository.
 
 ## Project Overview
 
@@ -124,6 +124,18 @@ uv run pytest tests/ && uv run mypy src/ && uv run ruff check src/ tests/ && uv 
 | **ruff** | Linting + Formatting | 10-100x faster than flake8/black, single tool for both |
 | **pytest-cov** | Coverage | Ensures adequate test coverage |
 
+### Dev Tools and MCP Servers
+
+- `uv` - Python environment manager
+- `context7 mcp` - Use to lookup information about frameworks and tools tools you are using
+- `sayft-dev mcp` - Use to find search code, find method, class, file, etc. 
+- `test-browser skill` or `agent-browser cli tool` - Use to debug and test web applications
+
+### Agent behavior
+
+IMPORTANT! Do not create _SUMMARY.md files to reflect changes. 
+Update corresponding _TASKS.md file to reflect progress
+
 ## Project Structure
 ```
 src/skill_framework/
@@ -183,9 +195,5 @@ Message 2 (hidden from UI, sent to LLM):
 - Deployment targets: AWS Bedrock, GCP Vertex AI, Anthropic API
 
 
-## Tools and MCP Servers
 
-- `uv` - Python environment manager
-- `context7 mcp` - Use to lookup information about frameworks and tools tools you are using
-- `sayft-dev mcp` - Use to find search code, find method, class, file, etc. 
-- `chrome-devtools mcp` - Use to debug and test web applications
+

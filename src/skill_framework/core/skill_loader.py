@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict
 
 import yaml
 
@@ -19,6 +19,10 @@ class SkillMetadata:
     activation_mode: str = "auto"  # auto | manual | preload
     required_tools: list[str] = field(default_factory=list)
     optional_tools: list[str] = field(default_factory=list)
+    allowed_tools: Optional[str] = None  # Comma-separated allowed tools string
+    license: Optional[str] = None
+    compatibility: Optional[str] = None
+    metadata: Optional[Dict[str, str]] = None  # Custom metadata map
     max_execution_time: Optional[int] = None
     max_memory: Optional[int] = None
     network_access: bool = False
@@ -124,6 +128,10 @@ class SkillLoader:
             activation_mode=frontmatter.get("activation_mode", "auto"),
             required_tools=frontmatter.get("required_tools", []),
             optional_tools=frontmatter.get("optional_tools", []),
+            allowed_tools=frontmatter.get("allowed-tools"),  # Note: hyphenated in YAML
+            license=frontmatter.get("license"),
+            compatibility=frontmatter.get("compatibility"),
+            metadata=frontmatter.get("metadata"),
             max_execution_time=frontmatter.get("max_execution_time"),
             max_memory=frontmatter.get("max_memory"),
             network_access=frontmatter.get("network_access", False),

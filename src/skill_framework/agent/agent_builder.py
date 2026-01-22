@@ -288,6 +288,7 @@ class AgentBuilder:
         - Builds the system prompt with skill metadata
         - Configures the adapter with the agent
         - Sets up conversation tracking
+        - Registers execution tools (bash_tool, read_file, write_file)
 
         Args:
             adapter: LLM adapter (e.g., ADKAdapter)
@@ -311,6 +312,7 @@ class AgentBuilder:
         # Generate session ID if not provided
         if session_id is None:
             import uuid
+
             session_id = f"session-{uuid.uuid4().hex[:8]}"
 
         # Create session
@@ -319,15 +321,20 @@ class AgentBuilder:
         # Build skill tool with dynamic docstring
         skill_tool = self._create_skill_tool(session_id)
 
+        # Create universal execution tools that work with active skill context
+        bash_tool = self._create_universal_bash_tool(session_id)
+        read_file_tool = self._create_universal_read_file_tool(session_id)
+        write_file_tool = self._create_universal_write_file_tool(session_id)
+
         # Build system prompt with skill awareness
         system_prompt = self._build_skill_aware_prompt(instruction)
 
-        # Configure adapter with agent
+        # Configure adapter with agent (include all tools)
         adapter.create_agent(
             name=name,
             instruction=system_prompt,
             description=description or f"{name} with skill support",
-            tools=[skill_tool],
+            tools=[skill_tool, bash_tool, read_file_tool, write_file_tool],
         )
 
         return SkillEnabledAgent(
@@ -373,10 +380,27 @@ class AgentBuilder:
                 # Track activation
                 conversation_manager.activate_skill(session_id, skill_name)
 
+                # Store skill context for tool creation
+                skill_directory = self.skills_dir / skill_name
+                conversation_manager.update_context(
+                    session_id=session_id,
+                    context_updates={
+                        "active_skill_name": skill_name,
+                        "active_skill_directory": str(skill_directory),
+                    },
+                )
+
+                # Check if skill has scripts
+                scripts_dir = skill_directory / "scripts"
+                if scripts_dir.exists() and scripts_dir.is_dir():
+                    tools_info = "\n\n**Available Tools**: bash_tool, read_file, write_file are now active for this skill."
+                else:
+                    tools_info = ""
+
                 # Return full instructions (loaded on-demand, not at startup)
                 return f"""# Skill Activated: {skill_name} (v{metadata.version})
 
-{skill_content.instructions}
+{skill_content.instructions}{tools_info}
 
 This skill remains active. Apply these instructions to related requests."""
             except Exception as e:
@@ -419,6 +443,210 @@ IMPORTANT: Proactively activate skills based on user intent:
 Once a skill is activated, it remains active - continue following its instructions for all related requests."""
 
         return self.build_system_prompt(base_instruction + skill_awareness)
+
+    def _create_execution_tools_for_skill(self, skill_name: str) -> list[Callable]:
+        """
+        Create execution tools for a skill with scripts.
+
+        This creates bash_tool, read_file, and write_file tools that are
+        scoped to the skill's directory and permissions.
+
+        Args:
+            skill_name: Name of the activated skill
+
+        Returns:
+            List of tool functions for ADK Agent
+        """
+        from ..integration.adk_tools import (
+            create_bash_tool_with_skill_executor,
+            create_read_file_tool,
+            create_write_file_tool,
+        )
+        from ..core.script_executor import ScriptExecutor, ExecutionConstraints
+
+        tools = []
+
+        # Get skill metadata and directory
+        metadata = self.skill_meta_tool.skills_metadata.get(skill_name)
+        if not metadata:
+            return tools
+
+        skill_directory = self.skills_dir / skill_name
+        scripts_dir = skill_directory / "scripts"
+
+        # Only create tools if skill has scripts directory
+        if not scripts_dir.exists() or not scripts_dir.is_dir():
+            return tools
+
+        # Create ScriptExecutor with skill's constraints
+        constraints = ExecutionConstraints(
+            max_execution_time=metadata.max_execution_time or 300,
+            max_memory=metadata.max_memory,
+            network_access=metadata.network_access,
+            working_directory=skill_directory,
+        )
+
+        script_executor = ScriptExecutor(
+            skill_name=skill_name,
+            skill_directory=skill_directory,
+            allowed_tools=metadata.allowed_tools,
+            constraints=constraints,
+        )
+
+        # Create bash tool with ScriptExecutor
+        bash_tool = create_bash_tool_with_skill_executor(script_executor)
+        tools.append(bash_tool)
+
+        # Create file I/O tools scoped to skill directory
+        read_tool = create_read_file_tool(str(skill_directory))
+        write_tool = create_write_file_tool(str(skill_directory))
+        tools.append(read_tool)
+        tools.append(write_tool)
+
+        return tools
+
+    def _create_universal_bash_tool(
+        self, session_id: str
+    ) -> Callable[[str, Optional[str]], str]:
+        """
+        Create a universal bash_tool that works with the currently active skill.
+
+        This tool checks if a skill with scripts is active and uses its ScriptExecutor.
+
+        Args:
+            session_id: Session ID for context lookup
+
+        Returns:
+            Callable bash_tool function
+        """
+        conversation_manager = self.conversation_manager
+
+        def bash_tool(command: str, working_directory: Optional[str] = None) -> str:
+            """Execute a bash command using the active skill's permissions.
+
+            IMPORTANT: Only works when a skill with scripts is active.
+            Commands are restricted by the skill's allowed-tools permissions.
+
+            Args:
+                command: The bash command to execute
+                working_directory: Optional working directory (relative to skill directory)
+
+            Returns:
+                Command output or error message
+            """
+            # Get conversation state
+            state = conversation_manager.get_conversation(session_id)
+            if not state:
+                return "Error: No active session. Activate a skill first."
+
+            # Check if there's an active skill
+            if not state.active_skills:
+                return "Error: No skill is currently active. Activate a skill with scripts before using bash_tool."
+
+            # Get the active skill name
+            active_skill = state.active_skills[-1]  # Most recently activated
+
+            # Create executor for this skill
+            execution_tools = self._create_execution_tools_for_skill(active_skill)
+            if not execution_tools:
+                return f"Error: Skill '{active_skill}' does not have scripts directory. Cannot execute commands."
+
+            # Use the bash tool (first in list)
+            bash_executor = execution_tools[0]
+            return bash_executor(command, working_directory)
+
+        return bash_tool
+
+    def _create_universal_read_file_tool(self, session_id: str) -> Callable[[str], str]:
+        """
+        Create a universal read_file tool that works with the currently active skill.
+
+        Args:
+            session_id: Session ID for context lookup
+
+        Returns:
+            Callable read_file function
+        """
+        conversation_manager = self.conversation_manager
+
+        def read_file(file_path: str) -> str:
+            """Read a file from the active skill's directory.
+
+            Args:
+                file_path: Relative path to file from skill directory
+
+            Returns:
+                File contents or error message
+            """
+            # Get conversation state
+            state = conversation_manager.get_conversation(session_id)
+            if not state:
+                return "Error: No active session. Activate a skill first."
+
+            # Check if there's an active skill
+            if not state.active_skills:
+                return "Error: No skill is currently active. Activate a skill before using read_file."
+
+            # Get the active skill name
+            active_skill = state.active_skills[-1]
+
+            # Create executor for this skill
+            execution_tools = self._create_execution_tools_for_skill(active_skill)
+            if not execution_tools or len(execution_tools) < 2:
+                return f"Error: Skill '{active_skill}' does not have file I/O tools."
+
+            # Use the read_file tool (second in list)
+            read_executor = execution_tools[1]
+            return read_executor(file_path)
+
+        return read_file
+
+    def _create_universal_write_file_tool(
+        self, session_id: str
+    ) -> Callable[[str, str], str]:
+        """
+        Create a universal write_file tool that works with the currently active skill.
+
+        Args:
+            session_id: Session ID for context lookup
+
+        Returns:
+            Callable write_file function
+        """
+        conversation_manager = self.conversation_manager
+
+        def write_file(file_path: str, content: str) -> str:
+            """Write content to a file in the active skill's directory.
+
+            Args:
+                file_path: Relative path to file from skill directory
+                content: Content to write
+
+            Returns:
+                Success message or error
+            """
+            # Get conversation state
+            state = conversation_manager.get_conversation(session_id)
+            if not state:
+                return "Error: No active session. Activate a skill first."
+
+            # Check if there's an active skill
+            if not state.active_skills:
+                return "Error: No skill is currently active. Activate a skill before using write_file."
+
+            # Get the active skill name
+            active_skill = state.active_skills[-1]
+
+            # Create executor for this skill
+            execution_tools = self._create_execution_tools_for_skill(active_skill)
+            if not execution_tools or len(execution_tools) < 3:
+                return f"Error: Skill '{active_skill}' does not have file I/O tools."
+
+            # Use the write_file tool (third in list)
+            write_executor = execution_tools[2]
+            return write_executor(file_path, content)
+
+        return write_file
 
 
 class SkillEnabledAgent:
