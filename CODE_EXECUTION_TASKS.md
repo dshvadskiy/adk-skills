@@ -497,21 +497,25 @@ This document breaks down the implementation of code execution support for Agent
 
 ---
 
-### Task 6.2: Add Execution Metrics and Logging
+### Task 6.2: Add Execution Metrics and Logging ✅ COMPLETED
 **File**: `src/skill_framework/core/script_executor.py`
 
 **Subtasks**:
-- [ ] Add structured logging to ScriptExecutor
-- [ ] Log execution start/end with timing
-- [ ] Log permission checks (allowed/denied)
-- [ ] Log resource usage (execution time)
-- [ ] Add execution metrics collection
-- [ ] Create ExecutionMetrics dataclass
+- [x] Add structured logging to ScriptExecutor
+- [x] Log execution start/end with timing
+- [x] Log permission checks (allowed/denied)
+- [x] Log resource usage (execution time)
+- [x] Add execution metrics collection
+- [x] Create ExecutionMetrics dataclass
 
 **Acceptance Criteria**:
-- All executions logged with context
-- Metrics available for monitoring
-- Debug-friendly log output
+- ✅ All executions logged with context (INFO, WARNING, ERROR levels)
+- ✅ Metrics available for monitoring (ExecutionMetrics with get_metrics() method)
+- ✅ Debug-friendly log output (structured logging with extra fields)
+- ✅ 8 new unit tests passing (36 total for ScriptExecutor)
+- ✅ Type checking passed (mypy)
+- ✅ Linting passed (ruff)
+- ✅ Formatting verified (ruff format)
 
 ---
 
@@ -619,10 +623,10 @@ This document breaks down the implementation of code execution support for Agent
 3. ✅ **Testing Infrastructure**: Comprehensive test coverage (COMPLETE)
 4. ✅ **Example Skills**: Working examples and docs (COMPLETE)
 5. ✅ **Google ADK Integration**: ADK tool integration (COMPLETE)
-6. **Advanced Features**: Validation, metrics, sandboxing (OPTIONAL)
+6. **Advanced Features**: Validation, metrics, sandboxing (IN PROGRESS - Task 6.2 ✅)
 7. **Deployment**: Documentation and final validation (OPTIONAL)
 
-**Current Status**: Phase 5 Complete - 213 tests passing
+**Current Status**: Phase 6 - Task 6.2 Complete - 221 tests passing (36 for ScriptExecutor)
 
 **Completed Tasks**:
 - Phase 1: Tasks 1.1-1.5 ✅ (ScriptExecutor core with 92% coverage)
@@ -631,6 +635,7 @@ This document breaks down the implementation of code execution support for Agent
 - Phase 4: Tasks 4.1, 4.3 ✅ (Example skill + comprehensive documentation)
 - Phase 4: Task 4.2 ⏭️ (Skipped - not needed)
 - Phase 5: Tasks 5.1-5.3 ✅ (ADK integration with execution tools)
+- Phase 6: Task 6.2 ✅ (Execution metrics and structured logging)
 
 **Implementation Notes**:
 

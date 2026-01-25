@@ -7,9 +7,42 @@ path validation, and resource constraints.
 import subprocess
 import shlex
 import re
+import logging
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict
+
+# Configure logger for script execution
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ExecutionMetrics:
+    """Metrics collected during script execution.
+
+    Attributes:
+        total_executions: Total number of executions
+        successful_executions: Number of successful executions
+        failed_executions: Number of failed executions
+        permission_denials: Number of permission denials
+        timeouts: Number of timeout occurrences
+        total_execution_time: Total time spent executing (seconds)
+        average_execution_time: Average execution time (seconds)
+    """
+
+    total_executions: int = 0
+    successful_executions: int = 0
+    failed_executions: int = 0
+    permission_denials: int = 0
+    timeouts: int = 0
+    total_execution_time: float = 0.0
+
+    @property
+    def average_execution_time(self) -> float:
+        """Calculate average execution time."""
+        if self.total_executions == 0:
+            return 0.0
+        return self.total_execution_time / self.total_executions
 
 
 @dataclass
@@ -84,10 +117,21 @@ class ScriptExecutor:
         self.scripts_directory = self.skill_directory / "scripts"
         self.allowed_tools = self._parse_allowed_tools(allowed_tools or "")
         self.constraints = constraints or ExecutionConstraints()
+        self.metrics = ExecutionMetrics()
 
         # Update constraints with parsed allowed commands
         if self.allowed_tools:
             self.constraints.allowed_commands = self.allowed_tools
+
+        logger.info(
+            "ScriptExecutor initialized",
+            extra={
+                "skill_name": self.skill_name,
+                "skill_directory": str(self.skill_directory),
+                "allowed_tools": self.allowed_tools,
+                "max_execution_time": self.constraints.max_execution_time,
+            },
+        )
 
     def _parse_allowed_tools(self, allowed_tools: str) -> List[str]:
         """Parse allowed-tools string into list of tool permissions.
@@ -134,6 +178,10 @@ class ScriptExecutor:
             True if command is allowed, False otherwise
         """
         if not self.allowed_tools:
+            logger.warning(
+                "Command permission check failed: no allowed tools configured",
+                extra={"skill_name": self.skill_name, "command": command},
+            )
             return False
 
         try:
@@ -157,6 +205,14 @@ class ScriptExecutor:
                 if tool_type.lower() == "bash":
                     if scope is None:
                         # No scope specified, allow all bash commands
+                        logger.debug(
+                            "Command allowed: unrestricted bash access",
+                            extra={
+                                "skill_name": self.skill_name,
+                                "command": command,
+                                "pattern": tool_pattern,
+                            },
+                        )
                         return True
 
                     # Remove trailing :* for wildcard matching
@@ -164,26 +220,74 @@ class ScriptExecutor:
                         scope_prefix = scope[:-2]
                         # Check if command starts with scope prefix
                         if base_command == scope_prefix:
+                            logger.debug(
+                                "Command allowed: wildcard match",
+                                extra={
+                                    "skill_name": self.skill_name,
+                                    "command": command,
+                                    "pattern": tool_pattern,
+                                },
+                            )
                             return True
                         # Check for scoped commands like "git status"
                         if len(parts) > 1:
                             scoped_cmd = f"{base_command} {parts[1]}"
                             if scoped_cmd.startswith(scope_prefix):
+                                logger.debug(
+                                    "Command allowed: scoped wildcard match",
+                                    extra={
+                                        "skill_name": self.skill_name,
+                                        "command": command,
+                                        "pattern": tool_pattern,
+                                    },
+                                )
                                 return True
                     else:
                         # Exact match required - command must match exactly with no additional args
                         if base_command == scope and len(parts) == 1:
+                            logger.debug(
+                                "Command allowed: exact match",
+                                extra={
+                                    "skill_name": self.skill_name,
+                                    "command": command,
+                                    "pattern": tool_pattern,
+                                },
+                            )
                             return True
                         # Check full command for scoped matches (e.g., "git status")
                         if len(parts) >= 2:
                             scoped_cmd = f"{base_command} {parts[1]}"
                             if scoped_cmd == scope:
+                                logger.debug(
+                                    "Command allowed: scoped exact match",
+                                    extra={
+                                        "skill_name": self.skill_name,
+                                        "command": command,
+                                        "pattern": tool_pattern,
+                                    },
+                                )
                                 return True
 
+            logger.warning(
+                "Command permission denied: no matching pattern",
+                extra={
+                    "skill_name": self.skill_name,
+                    "command": command,
+                    "allowed_tools": self.allowed_tools,
+                },
+            )
             return False
 
-        except Exception:
+        except Exception as e:
             # If parsing fails, deny the command
+            logger.error(
+                "Command permission check failed: parsing error",
+                extra={
+                    "skill_name": self.skill_name,
+                    "command": command,
+                    "error": str(e),
+                },
+            )
             return False
 
     def validate_script_path(self, script_path: str) -> Path:
@@ -252,8 +356,32 @@ class ScriptExecutor:
 
         start_time = time.time()
 
+        logger.info(
+            "Execution started",
+            extra={
+                "skill_name": self.skill_name,
+                "command": command,
+                "working_dir": str(working_dir)
+                if working_dir
+                else str(self.skill_directory),
+            },
+        )
+
         # Check command permissions
         if not self.is_command_allowed(command):
+            self.metrics.total_executions += 1
+            self.metrics.failed_executions += 1
+            self.metrics.permission_denials += 1
+
+            logger.warning(
+                "Execution blocked: permission denied",
+                extra={
+                    "skill_name": self.skill_name,
+                    "command": command,
+                    "allowed_tools": self.allowed_tools,
+                },
+            )
+
             return ExecutionResult(
                 success=False,
                 exit_code=-1,
@@ -295,6 +423,25 @@ class ScriptExecutor:
 
             execution_time = time.time() - start_time
 
+            # Update metrics
+            self.metrics.total_executions += 1
+            self.metrics.total_execution_time += execution_time
+            if result.returncode == 0:
+                self.metrics.successful_executions += 1
+            else:
+                self.metrics.failed_executions += 1
+
+            logger.info(
+                "Execution completed",
+                extra={
+                    "skill_name": self.skill_name,
+                    "command": command,
+                    "exit_code": result.returncode,
+                    "execution_time": execution_time,
+                    "success": result.returncode == 0,
+                },
+            )
+
             return ExecutionResult(
                 success=result.returncode == 0,
                 exit_code=result.returncode,
@@ -309,6 +456,23 @@ class ScriptExecutor:
 
         except subprocess.TimeoutExpired:
             execution_time = time.time() - start_time
+
+            # Update metrics
+            self.metrics.total_executions += 1
+            self.metrics.failed_executions += 1
+            self.metrics.timeouts += 1
+            self.metrics.total_execution_time += execution_time
+
+            logger.error(
+                "Execution timeout",
+                extra={
+                    "skill_name": self.skill_name,
+                    "command": command,
+                    "timeout": self.constraints.max_execution_time,
+                    "execution_time": execution_time,
+                },
+            )
+
             return ExecutionResult(
                 success=False,
                 exit_code=-1,
@@ -320,6 +484,22 @@ class ScriptExecutor:
             )
         except Exception as e:
             execution_time = time.time() - start_time
+
+            # Update metrics
+            self.metrics.total_executions += 1
+            self.metrics.failed_executions += 1
+            self.metrics.total_execution_time += execution_time
+
+            logger.error(
+                "Execution failed",
+                extra={
+                    "skill_name": self.skill_name,
+                    "command": command,
+                    "error": str(e),
+                    "execution_time": execution_time,
+                },
+            )
+
             return ExecutionResult(
                 success=False,
                 exit_code=-1,
@@ -329,3 +509,19 @@ class ScriptExecutor:
                 command=command,
                 error=f"Execution failed: {str(e)}",
             )
+
+    def get_metrics(self) -> ExecutionMetrics:
+        """Get execution metrics for this executor.
+
+        Returns:
+            ExecutionMetrics with current statistics
+        """
+        return self.metrics
+
+    def reset_metrics(self) -> None:
+        """Reset execution metrics to zero."""
+        self.metrics = ExecutionMetrics()
+        logger.info(
+            "Metrics reset",
+            extra={"skill_name": self.skill_name},
+        )

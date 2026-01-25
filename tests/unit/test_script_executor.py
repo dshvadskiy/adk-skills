@@ -436,3 +436,162 @@ class TestExecute:
 
         assert result.success is True
         assert "scripts" in result.stdout
+
+
+class TestExecutionMetrics:
+    """Test execution metrics tracking."""
+
+    def test_metrics_initialization(self, temp_skill_dir):
+        """Test metrics are initialized to zero."""
+        executor = ScriptExecutor(
+            skill_name="test-skill",
+            skill_directory=temp_skill_dir,
+            allowed_tools="Bash(echo:*)",
+        )
+
+        metrics = executor.get_metrics()
+        assert metrics.total_executions == 0
+        assert metrics.successful_executions == 0
+        assert metrics.failed_executions == 0
+        assert metrics.permission_denials == 0
+        assert metrics.timeouts == 0
+        assert metrics.total_execution_time == 0.0
+        assert metrics.average_execution_time == 0.0
+
+    def test_metrics_successful_execution(self, temp_skill_dir):
+        """Test metrics updated on successful execution."""
+        executor = ScriptExecutor(
+            skill_name="test-skill",
+            skill_directory=temp_skill_dir,
+            allowed_tools="Bash(echo:*)",
+        )
+
+        result = executor.execute("echo 'test'")
+
+        assert result.success
+        metrics = executor.get_metrics()
+        assert metrics.total_executions == 1
+        assert metrics.successful_executions == 1
+        assert metrics.failed_executions == 0
+        assert metrics.permission_denials == 0
+        assert metrics.total_execution_time > 0
+        assert metrics.average_execution_time > 0
+
+    def test_metrics_failed_execution(self, temp_skill_dir):
+        """Test metrics updated on failed execution."""
+        executor = ScriptExecutor(
+            skill_name="test-skill",
+            skill_directory=temp_skill_dir,
+            allowed_tools="Bash(false:*)",
+        )
+
+        result = executor.execute("false")
+
+        assert not result.success
+        metrics = executor.get_metrics()
+        assert metrics.total_executions == 1
+        assert metrics.successful_executions == 0
+        assert metrics.failed_executions == 1
+        assert metrics.permission_denials == 0
+
+    def test_metrics_permission_denial(self, temp_skill_dir):
+        """Test metrics updated on permission denial."""
+        executor = ScriptExecutor(
+            skill_name="test-skill",
+            skill_directory=temp_skill_dir,
+            allowed_tools="Bash(echo:*)",
+        )
+
+        result = executor.execute("python script.py")
+
+        assert not result.success
+        metrics = executor.get_metrics()
+        assert metrics.total_executions == 1
+        assert metrics.successful_executions == 0
+        assert metrics.failed_executions == 1
+        assert metrics.permission_denials == 1
+
+    def test_metrics_timeout(self, temp_skill_dir):
+        """Test metrics updated on timeout."""
+        constraints = ExecutionConstraints(max_execution_time=1)
+        executor = ScriptExecutor(
+            skill_name="test-skill",
+            skill_directory=temp_skill_dir,
+            allowed_tools="Bash(sleep:*)",
+            constraints=constraints,
+        )
+
+        result = executor.execute("sleep 10")
+
+        assert not result.success
+        assert "timed out" in result.error
+        metrics = executor.get_metrics()
+        assert metrics.total_executions == 1
+        assert metrics.successful_executions == 0
+        assert metrics.failed_executions == 1
+        assert metrics.timeouts == 1
+
+    def test_metrics_multiple_executions(self, temp_skill_dir):
+        """Test metrics accumulate across multiple executions."""
+        executor = ScriptExecutor(
+            skill_name="test-skill",
+            skill_directory=temp_skill_dir,
+            allowed_tools="Bash(echo:*),Bash(false:*)",
+        )
+
+        # Successful execution
+        executor.execute("echo 'test1'")
+        # Another successful execution
+        executor.execute("echo 'test2'")
+        # Failed execution
+        executor.execute("false")
+
+        metrics = executor.get_metrics()
+        assert metrics.total_executions == 3
+        assert metrics.successful_executions == 2
+        assert metrics.failed_executions == 1
+        assert metrics.average_execution_time > 0
+
+    def test_metrics_average_calculation(self, temp_skill_dir):
+        """Test average execution time calculation."""
+        executor = ScriptExecutor(
+            skill_name="test-skill",
+            skill_directory=temp_skill_dir,
+            allowed_tools="Bash(echo:*)",
+        )
+
+        # Execute multiple times
+        for i in range(3):
+            executor.execute(f"echo 'test{i}'")
+
+        metrics = executor.get_metrics()
+        assert metrics.total_executions == 3
+        assert metrics.average_execution_time == (
+            metrics.total_execution_time / metrics.total_executions
+        )
+
+    def test_metrics_reset(self, temp_skill_dir):
+        """Test metrics can be reset."""
+        executor = ScriptExecutor(
+            skill_name="test-skill",
+            skill_directory=temp_skill_dir,
+            allowed_tools="Bash(echo:*)",
+        )
+
+        # Execute some commands
+        executor.execute("echo 'test1'")
+        executor.execute("echo 'test2'")
+
+        # Verify metrics are non-zero
+        metrics = executor.get_metrics()
+        assert metrics.total_executions == 2
+
+        # Reset metrics
+        executor.reset_metrics()
+
+        # Verify metrics are zero
+        metrics = executor.get_metrics()
+        assert metrics.total_executions == 0
+        assert metrics.successful_executions == 0
+        assert metrics.failed_executions == 0
+        assert metrics.total_execution_time == 0.0
