@@ -1,6 +1,6 @@
 """Tests for ConversationManager - conversation state and message history management."""
 
-from datetime import datetime, timezone
+from datetime import datetime
 
 import pytest
 

@@ -7,9 +7,18 @@ Usage:
 """
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 from typing import Optional
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(levelname)s: %(message)s',
+    stream=sys.stderr
+)
+logger = logging.getLogger(__name__)
 
 try:
     import pandas as pd
@@ -19,10 +28,7 @@ try:
     import matplotlib.pyplot as plt
     import seaborn as sns
 except ImportError:
-    print(
-        "Error: Required packages not installed. Install with: pip install pandas matplotlib seaborn",
-        file=sys.stderr,
-    )
+    logger.error("Required packages not installed. Install with: pip install pandas matplotlib seaborn")
     sys.exit(1)
 
 
@@ -74,7 +80,7 @@ def create_histogram(df: pd.DataFrame, x: str, output: str):
 
     plt.tight_layout()
     plt.savefig(output, dpi=300, bbox_inches="tight")
-    print(f"Saved histogram to {output}")
+    logger.info(f"Saved histogram to {output}")
 
 
 def create_scatter(df: pd.DataFrame, x: str, y: str, output: str):
@@ -111,7 +117,7 @@ def create_scatter(df: pd.DataFrame, x: str, y: str, output: str):
 
     plt.tight_layout()
     plt.savefig(output, dpi=300, bbox_inches="tight")
-    print(f"Saved scatter plot to {output}")
+    logger.info(f"Saved scatter plot to {output}")
 
 
 def create_bar(df: pd.DataFrame, x: str, y: Optional[str], output: str):
@@ -144,7 +150,7 @@ def create_bar(df: pd.DataFrame, x: str, y: Optional[str], output: str):
 
     plt.tight_layout()
     plt.savefig(output, dpi=300, bbox_inches="tight")
-    print(f"Saved bar chart to {output}")
+    logger.info(f"Saved bar chart to {output}")
 
 
 def create_line(df: pd.DataFrame, x: str, y: str, output: str):

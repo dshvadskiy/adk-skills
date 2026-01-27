@@ -6,9 +6,12 @@ from typing import Any, AsyncIterator, Callable, Optional, TYPE_CHECKING
 from ..core.skill_meta_tool import SkillMetaTool, SkillActivationResult
 from ..tools.tool_registry import ToolRegistry
 from .conversation import ConversationManager
+from ..observability.logging_config import get_logger
 
 if TYPE_CHECKING:
     from ..integration.base_adapter import BaseLLMAdapter
+
+logger = get_logger(__name__)
 
 
 class AgentBuilder:
@@ -39,8 +42,9 @@ class AgentBuilder:
         """
         if skills_directory is None:
             from ..config import Config
+
             skills_directory = Config.get_skills_dir()
-        
+
         self.skills_dir = Path(skills_directory)
 
         # Initialize skill meta-tool
@@ -81,9 +85,11 @@ class AgentBuilder:
         Returns:
             Self for method chaining
         """
+        logger.info(f"Registering tool: {name}")
         self.tool_registry.register_tool(name, definition)
         if handler:
             self._tool_handlers[name] = handler
+            logger.debug(f"Tool handler registered for: {name}")
         return self
 
     def build_system_prompt(self, base_instruction: str) -> str:
@@ -231,6 +237,7 @@ class AgentBuilder:
         Returns:
             Session ID
         """
+        logger.info(f"Creating conversation session: {session_id}")
         self.conversation_manager.create_conversation(session_id)
         return session_id
 
@@ -318,6 +325,8 @@ class AgentBuilder:
             import uuid
 
             session_id = f"session-{uuid.uuid4().hex[:8]}"
+
+        logger.info(f"Creating agent: {name}, session_id={session_id}")
 
         # Create session
         self.create_session(session_id)
@@ -468,7 +477,7 @@ Once a skill is activated, it remains active - continue following its instructio
         )
         from ..core.script_executor import ScriptExecutor, ExecutionConstraints
 
-        tools = []
+        tools: list[Callable] = []
 
         # Get skill metadata and directory
         metadata = self.skill_meta_tool.skills_metadata.get(skill_name)

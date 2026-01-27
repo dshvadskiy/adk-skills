@@ -215,7 +215,9 @@ class TestEndToEndSkillActivation:
 
         # Should NOT contain full instructions (progressive disclosure)
         # The full instructions are only loaded on activation
-        assert "This skill demonstrates" not in system_prompt or len(system_prompt) < 2000
+        assert (
+            "This skill demonstrates" not in system_prompt or len(system_prompt) < 2000
+        )
 
     @pytest.mark.asyncio
     async def test_visible_vs_api_messages(

@@ -26,6 +26,7 @@ Then open http://localhost:8000 in your browser.
 import argparse
 import asyncio
 import json
+import logging
 import os
 import sys
 import uuid
@@ -59,6 +60,9 @@ from skill_framework.integration.adk_adapter import ADKAdapter
 from skill_framework.artifact_publisher import (
     ArtifactPublisher, LocalBackend, get_publisher
 )
+
+# Setup logging
+logger = logging.getLogger(__name__)
 
 
 # Request/Response models
@@ -179,6 +183,11 @@ async def startup_event():
     """Initialize agent on startup."""
     global agent_instance, builder_instance, artifact_publisher
     
+    # Initialize Phoenix telemetry FIRST (before creating any agents)
+    from skill_framework.observability.telemetry import setup_telemetry
+    setup_telemetry(project_name="skill_chat_server", auto_instrument=True)
+    logger.info("Phoenix telemetry initialized")
+    
     # Initialize artifact publisher (auto-configures from env)
     artifact_publisher = get_publisher()
     
@@ -201,8 +210,8 @@ async def startup_event():
     provider = os.getenv("LLM_PROVIDER", "bedrock")
     model_name = os.getenv("MODEL_NAME")
     
-    print(f"Initializing agent with provider: {provider}")
-    print(f"Skills directory: {skills_dir}")
+    logger.info(f"Initializing agent with provider: {provider}")
+    logger.info(f"Skills directory: {skills_dir}")
     model = create_model(provider, model_name)
     
     adapter = ADKAdapter(model=model, app_name="skill_chat_demo")
@@ -231,7 +240,7 @@ You: *activates skill* → "Here's what the presentation contains..." ❌ NO FIL
 When appropriate, use skills to enhance your responses.""",
     )
     
-    print(f"Agent initialized with {len(agent_instance.available_skills)} skills")
+    logger.info(f"Agent initialized with {len(agent_instance.available_skills)} skills")
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -313,8 +322,8 @@ async def chat(request: ChatRequest):
         )
     except Exception as e:
         import traceback
-        print(f"Error in chat endpoint: {e}")
-        print(traceback.format_exc())
+        logger.error(f"Error in chat endpoint: {e}")
+        logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -362,7 +371,7 @@ async def websocket_chat(websocket: WebSocket):
                 })
     
     except WebSocketDisconnect:
-        print(f"WebSocket disconnected for session {session_id}")
+        logger.info(f"WebSocket disconnected for session {session_id}")
 
 
 def get_inline_html() -> str:
@@ -585,8 +594,8 @@ def main():
         os.environ["MODEL_NAME"] = args.model
     
     import uvicorn
-    print(f"\n🚀 Starting Skills Framework Chat Server")
-    print(f"📍 Open http://localhost:{args.port} in your browser\n")
+    logger.info(f"\n🚀 Starting Skills Framework Chat Server")
+    logger.info(f"📍 Open http://localhost:{args.port} in your browser\n")
     
     uvicorn.run(app, host=args.host, port=args.port)
 

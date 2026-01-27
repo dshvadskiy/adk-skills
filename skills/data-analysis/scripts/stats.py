@@ -7,18 +7,24 @@ Usage:
 """
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 from typing import Optional
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(levelname)s: %(message)s',
+    stream=sys.stderr
+)
+logger = logging.getLogger(__name__)
 
 try:
     import pandas as pd
     import numpy as np
 except ImportError:
-    print(
-        "Error: pandas and numpy are required. Install with: pip install pandas numpy",
-        file=sys.stderr,
-    )
+    logger.error("pandas and numpy are required. Install with: pip install pandas numpy")
     sys.exit(1)
 
 
@@ -96,20 +102,20 @@ def calculate_correlations(
 
 def print_data_info(df: pd.DataFrame):
     """Print general information about the dataset."""
-    print("=" * 60)
-    print("DATASET INFORMATION")
-    print("=" * 60)
-    print(f"Rows: {len(df)}")
-    print(f"Columns: {len(df.columns)}")
-    print("\nColumn Types:")
-    print(df.dtypes.to_string())
-    print("\nMissing Values:")
+    logger.info("=" * 60)
+    logger.info("DATASET INFORMATION")
+    logger.info("=" * 60)
+    logger.info(f"Rows: {len(df)}")
+    logger.info(f"Columns: {len(df.columns)}")
+    logger.info("\nColumn Types:")
+    logger.info(df.dtypes.to_string())
+    logger.info("\nMissing Values:")
     missing = df.isnull().sum()
     if missing.sum() > 0:
-        print(missing[missing > 0].to_string())
+        logger.info(missing[missing > 0].to_string())
     else:
-        print("No missing values")
-    print()
+        logger.info("No missing values")
+    logger.info("")
 
 
 def main():
@@ -149,24 +155,24 @@ Examples:
             print_data_info(df)
 
         # Calculate statistics
-        print("=" * 60)
-        print("DESCRIPTIVE STATISTICS")
-        print("=" * 60)
+        logger.info("=" * 60)
+        logger.info("DESCRIPTIVE STATISTICS")
+        logger.info("=" * 60)
         stats = calculate_statistics(df, args.columns)
-        print(stats.to_string())
-        print()
+        logger.info(stats.to_string())
+        logger.info("")
 
         # Calculate correlations if requested
         if args.correlations:
-            print("=" * 60)
-            print("CORRELATION MATRIX")
-            print("=" * 60)
+            logger.info("=" * 60)
+            logger.info("CORRELATION MATRIX")
+            logger.info("=" * 60)
             corr = calculate_correlations(df, args.columns)
-            print(corr.to_string())
-            print()
+            logger.info(corr.to_string())
+            logger.info("")
 
             # Highlight strong correlations
-            print("Strong Correlations (|r| > 0.7):")
+            logger.info("Strong Correlations (|r| > 0.7):")
             strong_corr = []
             for i in range(len(corr.columns)):
                 for j in range(i + 1, len(corr.columns)):
@@ -177,21 +183,21 @@ Examples:
                         )
 
             if strong_corr:
-                print("\n".join(strong_corr))
+                logger.info("\n".join(strong_corr))
             else:
-                print("  None found")
-            print()
+                logger.info("  None found")
+            logger.info("")
 
         return 0
 
     except FileNotFoundError as e:
-        print(f"Error: {e}", file=sys.stderr)
+        logger.error(f"{e}")
         return 1
     except ValueError as e:
-        print(f"Error: {e}", file=sys.stderr)
+        logger.error(f"{e}")
         return 1
     except Exception as e:
-        print(f"Unexpected error: {e}", file=sys.stderr)
+        logger.error(f"Unexpected error: {e}")
         import traceback
 
         traceback.print_exc()

@@ -65,8 +65,9 @@ class SkillMetaTool:
         """
         if skills_directory is None:
             from ..config import Config
+
             skills_directory = Config.get_skills_dir()
-        
+
         self.skills_dir = Path(skills_directory)
         self.cache_enabled = cache_enabled
 

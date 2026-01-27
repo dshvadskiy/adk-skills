@@ -5,6 +5,10 @@ from typing import Any, Optional
 
 from dataclasses import dataclass, field
 
+from ..observability.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 
 @dataclass
 class Message:
@@ -51,6 +55,7 @@ class ConversationManager:
 
     def create_conversation(self, session_id: str) -> ConversationState:
         """Create new conversation"""
+        logger.info(f"Creating new conversation: {session_id}")
         state = ConversationState(session_id=session_id)
         self.conversations[session_id] = state
         return state
@@ -78,6 +83,9 @@ class ConversationManager:
 
         state.messages.append(message)
         state.updated_at = datetime.now(timezone.utc).isoformat()
+        logger.debug(
+            f"User message added to {session_id}, content_length={len(content)}"
+        )
 
     def add_assistant_message(
         self,
@@ -98,6 +106,7 @@ class ConversationManager:
 
         state.messages.append(message)
         state.updated_at = datetime.now(timezone.utc).isoformat()
+        logger.debug(f"Assistant message added to {session_id}")
 
     def inject_skill_messages(
         self,
@@ -114,6 +123,9 @@ class ConversationManager:
         state = self.get_conversation(session_id)
         if not state:
             raise ValueError(f"Conversation {session_id} not found")
+
+        skill_name = metadata_message.get("metadata", {}).get("skill_name", "unknown")
+        logger.info(f"Injecting skill messages for {skill_name} in {session_id}")
 
         msg1 = Message(
             role=metadata_message["role"],
@@ -196,9 +208,11 @@ class ConversationManager:
         state = self.get_conversation(session_id)
         if state and skill_name not in state.active_skills:
             state.active_skills.append(skill_name)
+            logger.info(f"Skill activated: {skill_name} in session {session_id}")
 
     def deactivate_skill(self, session_id: str, skill_name: str) -> None:
         """Mark skill as inactive"""
         state = self.get_conversation(session_id)
         if state and skill_name in state.active_skills:
             state.active_skills.remove(skill_name)
+            logger.info(f"Skill deactivated: {skill_name} in session {session_id}")

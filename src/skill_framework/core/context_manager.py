@@ -3,8 +3,12 @@
 from copy import deepcopy
 from typing import TYPE_CHECKING, Any
 
+from ..observability.logging_config import get_logger
+
 if TYPE_CHECKING:
     from .skill_loader import SkillMetadata
+
+logger = get_logger(__name__)
 
 
 class ContextManager:
@@ -46,6 +50,7 @@ class ContextManager:
         Returns:
             Modified execution context
         """
+        logger.debug(f"Modifying context for skill: {skill_name}")
         # Start with current context
         modified = deepcopy(current_context)
 
@@ -87,6 +92,12 @@ class ContextManager:
         # Track active skill
         modified["active_skill"] = skill_name
         modified["skill_version"] = skill_metadata.version
+
+        logger.info(
+            f"Context modified for skill: {skill_name}, "
+            f"allowed_tools={modified.get('allowed_tools', [])}, "
+            f"network_access={modified.get('network_access', False)}"
+        )
 
         return modified
 
@@ -137,4 +148,5 @@ class ContextManager:
         Returns:
             Deep copy of default context
         """
+        logger.info("Restoring default execution context")
         return deepcopy(self.default_context)

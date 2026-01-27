@@ -4,6 +4,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .skill_loader import SkillMetadata
+from ..observability.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 class MessageInjector:
@@ -32,6 +35,7 @@ class MessageInjector:
         This message appears in conversation history and UI.
         Uses <command-message> XML tag for identification.
         """
+        logger.debug(f"Creating metadata message for skill: {skill_name}")
         return {
             "role": "user",
             "content": (
@@ -64,6 +68,10 @@ class MessageInjector:
 
         This is the core of progressive disclosure.
         """
+        logger.debug(
+            f"Creating instruction message for skill: {skill_name}, "
+            f"instructions_length={len(instructions)}"
+        )
         return {
             "role": "user",
             "content": self._format_instructions(skill_name, instructions, metadata),

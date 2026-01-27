@@ -3,6 +3,10 @@
 from enum import Enum
 from typing import Any, Dict
 
+from ..observability.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 
 class PermissionLevel(Enum):
     """Permission levels for tools"""
@@ -71,15 +75,23 @@ class PermissionManager:
 
         Returns modified context with permission constraints.
         """
+        logger.debug(f"Applying permissions for skill: {skill_name}")
         # Get skill profile or use metadata
         if skill_name in self.skill_profiles:
             permissions = self.skill_profiles[skill_name]
+            logger.debug(f"Using predefined permission profile for {skill_name}")
         else:
             permissions = self._build_permissions_from_metadata(skill_metadata)
+            logger.debug(f"Built permissions from metadata for {skill_name}")
 
         # Apply to context
         context["tool_permissions"] = permissions
         context["allowed_tools"] = list(permissions.keys())
+
+        logger.info(
+            f"Permissions applied for skill: {skill_name}, "
+            f"allowed_tools={list(permissions.keys())}"
+        )
 
         return context
 
@@ -116,6 +128,9 @@ class PermissionManager:
         permissions = context.get("tool_permissions", {})
 
         if tool_name not in permissions:
+            logger.warning(
+                f"Permission denied: tool '{tool_name}' not in allowed tools"
+            )
             return False
 
         granted_level = permissions[tool_name]
@@ -129,4 +144,17 @@ class PermissionManager:
             PermissionLevel.ADMIN: 4,
         }
 
-        return hierarchy[granted_level] >= hierarchy[required_level]
+        allowed = hierarchy[granted_level] >= hierarchy[required_level]
+
+        if allowed:
+            logger.info(
+                f"Permission granted: tool='{tool_name}', "
+                f"granted={granted_level.value}, required={required_level.value}"
+            )
+        else:
+            logger.warning(
+                f"Permission denied: tool='{tool_name}', "
+                f"granted={granted_level.value}, required={required_level.value}"
+            )
+
+        return allowed

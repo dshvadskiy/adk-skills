@@ -46,6 +46,30 @@ class BaseLLMAdapter(ABC):
     - Streaming (optional)
     """
 
+    def create_agent(
+        self,
+        name: str,
+        instruction: str,
+        description: str = "",
+        tools: Optional[list[Any]] = None,
+    ) -> Any:
+        """
+        Create an agent with the given configuration.
+
+        This is an optional method for adapters that support agent creation.
+        Default implementation does nothing.
+
+        Args:
+            name: Agent name
+            instruction: System instruction/prompt
+            description: Agent description
+            tools: List of tools available to the agent
+
+        Returns:
+            Provider-specific agent object (or None if not applicable)
+        """
+        pass
+
     @abstractmethod
     async def send_message(
         self,
@@ -105,7 +129,7 @@ class BaseLLMAdapter(ABC):
     def format_messages(
         self,
         messages: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
+    ) -> Any:
         """
         Format messages for the provider.
 
@@ -116,7 +140,7 @@ class BaseLLMAdapter(ABC):
             messages: List of messages in standard format
 
         Returns:
-            Messages in provider-specific format
+            Messages in provider-specific format (type varies by provider)
         """
         return messages
 

@@ -144,7 +144,9 @@ class TestSessionManagement:
         """create_session creates conversation state."""
         session_id = builder.create_session("test-session-1")
         assert session_id == "test-session-1"
-        assert builder.conversation_manager.get_conversation("test-session-1") is not None
+        assert (
+            builder.conversation_manager.get_conversation("test-session-1") is not None
+        )
 
     def test_add_user_message(self, builder: AgentBuilder) -> None:
         """add_user_message adds to conversation."""

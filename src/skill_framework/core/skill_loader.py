@@ -6,6 +6,10 @@ from typing import Optional, Dict
 
 import yaml
 
+from ..observability.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 
 @dataclass
 class SkillMetadata:
@@ -67,12 +71,19 @@ class SkillLoader:
             FileNotFoundError: If SKILL.md not found
             ValueError: If SKILL.md format is invalid
         """
+        logger.debug(f"Loading skill: {skill_name}")
         skill_path = self._find_skill_file(skill_name)
         if not skill_path:
+            logger.error(f"SKILL.md not found for '{skill_name}'")
             raise FileNotFoundError(f"SKILL.md not found for '{skill_name}'")
 
         raw_content = skill_path.read_text(encoding="utf-8")
         metadata, instructions = self._parse_skill_md(raw_content)
+
+        logger.info(
+            f"Skill loaded: {skill_name} v{metadata.version}, "
+            f"instructions_length={len(instructions)}, path={skill_path}"
+        )
 
         return SkillContent(
             name=skill_name,
@@ -92,12 +103,15 @@ class SkillLoader:
         Returns:
             SkillMetadata from frontmatter only
         """
+        logger.debug(f"Loading metadata for skill: {skill_name}")
         skill_path = self._find_skill_file(skill_name)
         if not skill_path:
+            logger.error(f"SKILL.md not found for '{skill_name}'")
             raise FileNotFoundError(f"SKILL.md not found for '{skill_name}'")
 
         raw_content = skill_path.read_text(encoding="utf-8")
         metadata, _ = self._parse_skill_md(raw_content)
+        logger.debug(f"Metadata loaded: {skill_name} v{metadata.version}")
         return metadata
 
     def _find_skill_file(self, skill_name: str) -> Optional[Path]:
@@ -109,11 +123,14 @@ class SkillLoader:
 
     def _parse_skill_md(self, content: str) -> tuple[SkillMetadata, str]:
         """Parse SKILL.md: metadata + instructions."""
+        logger.debug("Parsing SKILL.md content")
         if not content.startswith("---"):
+            logger.warning("SKILL.md validation failed: missing YAML frontmatter")
             raise ValueError("SKILL.md must start with YAML frontmatter (---)")
 
         parts = content.split("---", 2)
         if len(parts) < 3:
+            logger.warning("SKILL.md validation failed: missing closing ---")
             raise ValueError("Invalid SKILL.md format: missing closing ---")
 
         frontmatter = yaml.safe_load(parts[1])

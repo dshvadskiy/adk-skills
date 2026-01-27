@@ -67,8 +67,8 @@ def create_presentation(title, subtitle, slides, output_path):
 
     # Save presentation
     prs.save(output_path)
-    print(f"✓ Presentation created: {output_path}")
-    print(f"✓ Slides: {len(slides) + 1} (1 title + {len(slides)} content)")
+    logger.info(f"✓ Presentation created: {output_path}")
+    logger.info(f"✓ Slides: {len(slides) + 1} (1 title + {len(slides)} content)")
     
     return output_path
 
@@ -112,7 +112,7 @@ def main():
         
         return 0
     except Exception as e:
-        print(f"Error creating presentation: {e}", file=sys.stderr)
+        logger.error(f"Error creating presentation: {e}")
         import traceback
         traceback.print_exc()
         return 1

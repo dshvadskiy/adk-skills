@@ -8,13 +8,11 @@ To run credential-requiring tests:
 """
 
 from pathlib import Path
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from skill_framework.agent import AgentBuilder
-from skill_framework.integration.base_adapter import LLMResponse, ToolCall
 
 
 # Only import ADKAdapter if google.adk is available
@@ -143,11 +141,14 @@ class TestADKAdapterWithMocks:
 
         mock_runner.run_async = mock_run_async
 
-        with patch(
-            "skill_framework.integration.adk_adapter.Agent", return_value=mock_agent
-        ), patch(
-            "skill_framework.integration.adk_adapter.InMemoryRunner",
-            return_value=mock_runner,
+        with (
+            patch(
+                "skill_framework.integration.adk_adapter.Agent", return_value=mock_agent
+            ),
+            patch(
+                "skill_framework.integration.adk_adapter.InMemoryRunner",
+                return_value=mock_runner,
+            ),
         ):
             response = await adk_adapter.send_message(
                 messages=[{"role": "user", "content": "Hello"}],
@@ -189,11 +190,14 @@ class TestADKAdapterWithMocks:
 
         mock_runner.run_async = mock_run_async
 
-        with patch(
-            "skill_framework.integration.adk_adapter.Agent", return_value=mock_agent
-        ), patch(
-            "skill_framework.integration.adk_adapter.InMemoryRunner",
-            return_value=mock_runner,
+        with (
+            patch(
+                "skill_framework.integration.adk_adapter.Agent", return_value=mock_agent
+            ),
+            patch(
+                "skill_framework.integration.adk_adapter.InMemoryRunner",
+                return_value=mock_runner,
+            ),
         ):
             response = await adk_adapter.send_message(
                 messages=[{"role": "user", "content": "Use a tool"}],
@@ -247,7 +251,7 @@ class TestADKAdapterWithAgentBuilder:
     ) -> None:
         """Test AgentBuilder works with ADKAdapter."""
         builder = AgentBuilder(skills_directory=skills_dir)
-        session_id = builder.create_session("test-session")
+        builder.create_session("test-session")
 
         # Get system prompt and tools
         system_prompt = builder.build_system_prompt("You are a helpful assistant.")
@@ -288,7 +292,9 @@ class TestADKAdapterWithAgentBuilder:
 
 
 @pytest.mark.adk_credentials
-@pytest.mark.skip(reason="Requires ADK credentials - run with: pytest -m adk_credentials")
+@pytest.mark.skip(
+    reason="Requires ADK credentials - run with: pytest -m adk_credentials"
+)
 class TestADKAdapterLive:
     """Live tests requiring actual ADK credentials.
 

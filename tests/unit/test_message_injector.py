@@ -100,7 +100,9 @@ class TestMessageInjector:
     ):
         """Test that the two messages have distinct visibility settings."""
         msg1 = injector.create_metadata_message("hello-world", metadata)
-        msg2 = injector.create_instruction_message("hello-world", instructions, metadata)
+        msg2 = injector.create_instruction_message(
+            "hello-world", instructions, metadata
+        )
 
         # Message 1: visible, no isMeta
         assert msg1["metadata"]["visible"] is True

@@ -46,7 +46,32 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 # Load .env file
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent / ".env")
-print(f"Loading .env file from {Path(__file__).parent.parent / ".env"}")
+
+# Setup observability (logging and OTEL)
+from skill_framework.observability.logging_config import setup_logging
+from skill_framework.observability.telemetry import setup_telemetry
+
+# Configure logging
+log_level = os.getenv("LOG_LEVEL", "INFO")
+log_format = os.getenv("LOG_FORMAT", "json")
+setup_logging(level=log_level, format_type=log_format)
+
+# Configure Phoenix telemetry (auto-instrumentation)
+phoenix_endpoint = os.getenv("PHOENIX_COLLECTOR_ENDPOINT", "http://localhost:6006")
+tracer_provider = setup_telemetry(
+    project_name="skill_framework_agent",
+    auto_instrument=True,
+)
+
+import logging
+logger = logging.getLogger(__name__)
+
+if tracer_provider:
+    logger.info(f"✓ Phoenix telemetry enabled: endpoint={phoenix_endpoint}")
+else:
+    logger.warning("⚠ Phoenix telemetry not available (install: pip install openinference-instrumentation-google-adk arize-phoenix-otel)")
+
+logger.info(f"Observability configured: log_level={log_level}")
 
 from skill_framework.agent import AgentBuilder
 from skill_framework.integration.adk_adapter import ADKAdapter
@@ -91,7 +116,7 @@ def create_model(provider: str, model_name: str | None = None):
         else:
             model_str = f"bedrock/{model_id}"
         
-        print(f"Using model: {model_str}")
+        logger.info(f"Using model: {model_str}")
         return LiteLlm(model=model_str)
 
     elif provider == "azure":
@@ -110,14 +135,14 @@ async def run_agent(provider: str, model_name: str | None = None) -> None:
     from skill_framework.config import Config
     skills_dir = Config.get_skills_dir()
 
-    print("=" * 60)
-    print(f"Skill Framework Agent - {provider.upper()}")
-    print("=" * 60)
-    print(f"Skills directory: {skills_dir}")
+    logger.info("=" * 60)
+    logger.info(f"Skill Framework Agent - {provider.upper()}")
+    logger.info("=" * 60)
+    logger.info(f"Skills directory: {skills_dir}")
 
     # Create model based on provider
     model = create_model(provider, model_name)
-    print(f"Using model: {model}")
+    logger.info(f"Using model: {model}")
 
     # Create adapter and builder (skills_directory is optional, uses config)
     adapter = ADKAdapter(model=model, app_name="skill_demo")
@@ -131,34 +156,34 @@ async def run_agent(provider: str, model_name: str | None = None) -> None:
     )
 
     # Show available skills
-    print("\nAvailable skills:")
+    logger.info("\nAvailable skills:")
     for name, description in agent.available_skills.items():
-        print(f"  - {name}: {description}")
+        logger.info(f"  - {name}: {description}")
 
-    print("\nType 'quit' to exit")
-    print("-" * 60)
+    logger.info("\nType 'quit' to exit")
+    logger.info("-" * 60)
 
     # Interactive loop
     while True:
         try:
             user_input = input("\nYou: ").strip()
         except (EOFError, KeyboardInterrupt):
-            print("\nGoodbye!")
+            logger.info("\nGoodbye!")
             break
 
         if not user_input:
             continue
 
         if user_input.lower() == "quit":
-            print("Goodbye!")
+            logger.info("Goodbye!")
             break
 
         # Send message and get response (message tracking handled automatically)
         try:
             response = await agent.chat(user_input)
-            print(f"\nAgent: {response}")
+            logger.info(f"\nAgent: {response}")
         except Exception as e:
-            print(f"\nError: {e}")
+            logger.error(f"\nError: {e}")
 
 
 def check_credentials(provider: str) -> bool:
@@ -173,7 +198,7 @@ def check_credentials(provider: str) -> bool:
 
     missing = [var for var in required_vars.get(provider, []) if not os.environ.get(var)]
     if missing:
-        print(f"Error: Missing environment variables for {provider}: {', '.join(missing)}")
+        logger.error(f"Error: Missing environment variables for {provider}: {', '.join(missing)}")
         return False
     return True
 

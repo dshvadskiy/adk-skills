@@ -7,17 +7,23 @@ Usage:
 """
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 from typing import Optional
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(levelname)s: %(message)s',
+    stream=sys.stderr
+)
+logger = logging.getLogger(__name__)
+
 try:
     import pandas as pd
 except ImportError:
-    print(
-        "Error: pandas is not installed. Install with: pip install pandas",
-        file=sys.stderr,
-    )
+    logger.error("pandas is not installed. Install with: pip install pandas")
     sys.exit(1)
 
 
@@ -101,7 +107,7 @@ Examples:
     try:
         # Load data
         df = load_data(args.input_file)
-        print(f"Loaded {len(df)} rows, {len(df.columns)} columns", file=sys.stderr)
+        logger.info(f"Loaded {len(df)} rows, {len(df.columns)} columns")
 
         # Filter columns
         df = filter_columns(df, args.columns)
@@ -110,9 +116,7 @@ Examples:
         original_count = len(df)
         df = filter_rows(df, args.filter)
         if args.filter:
-            print(
-                f"Filtered to {len(df)} rows (from {original_count})", file=sys.stderr
-            )
+            logger.info(f"Filtered to {len(df)} rows (from {original_count})")
 
         # Output results
         if args.output:
@@ -123,7 +127,7 @@ Examples:
                 df.to_json(args.output, orient="records", indent=2)
             else:
                 df.to_csv(args.output, index=False)
-            print(f"Saved to {args.output}", file=sys.stderr)
+            logger.info(f"Saved to {args.output}")
         else:
             # Print to stdout
             if args.format == "table":
@@ -136,13 +140,13 @@ Examples:
         return 0
 
     except FileNotFoundError as e:
-        print(f"Error: {e}", file=sys.stderr)
+        logger.error(f"{e}")
         return 1
     except ValueError as e:
-        print(f"Error: {e}", file=sys.stderr)
+        logger.error(f"{e}")
         return 1
     except Exception as e:
-        print(f"Unexpected error: {e}", file=sys.stderr)
+        logger.error(f"Unexpected error: {e}")
         return 1
 
 

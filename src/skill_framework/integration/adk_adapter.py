@@ -8,6 +8,9 @@ from google.adk.runners import InMemoryRunner
 from google.genai import types
 
 from .base_adapter import BaseLLMAdapter, LLMResponse, ToolCall
+from ..observability.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 # Type alias for ADK-compatible models
 # Can be a string (Gemini model ID) or any ADK model wrapper (LiteLlm, Ollama, etc.)
@@ -104,19 +107,30 @@ class ADKAdapter(BaseLLMAdapter):
         Returns:
             Configured Agent instance
         """
-        self._agent = Agent(
-            name=name,
-            model=self.model,
-            instruction=instruction,
-            description=description or f"{name} agent",
-            tools=tools or [],
+        logger.info(
+            f"Creating ADK agent: {name}, model={self.model}, tools={len(tools or [])}"
         )
-        self._runner = InMemoryRunner(
-            agent=self._agent,
-            app_name=self.app_name,
-        )
-        self._sessions.clear()  # Reset sessions on new agent
-        return self._agent
+
+        try:
+            self._agent = Agent(
+                name=name,
+                model=self.model,
+                instruction=instruction,
+                description=description or f"{name} agent",
+                tools=tools or [],
+            )
+            self._runner = InMemoryRunner(
+                agent=self._agent,
+                app_name=self.app_name,
+            )
+            self._sessions.clear()  # Reset sessions on new agent
+
+            logger.info(f"Agent created successfully: {name}")
+
+            return self._agent
+        except Exception as e:
+            logger.error(f"Failed to create agent {name}: {e}")
+            raise
 
     async def ensure_session(self, user_id: str, session_id: str) -> None:
         """
@@ -133,16 +147,25 @@ class ADKAdapter(BaseLLMAdapter):
 
         session_key = f"{user_id}:{session_id}"
         if session_key in self._sessions:
+            logger.debug(f"Session already exists: {session_key}")
             return
 
-        # Create session using runner's session service
-        session_service = self._runner.session_service
-        await session_service.create_session(
-            app_name=self.app_name,
-            user_id=user_id,
-            session_id=session_id,
-        )
-        self._sessions.add(session_key)
+        logger.info(f"Creating session: {session_key}")
+
+        try:
+            # Create session using runner's session service
+            session_service = self._runner.session_service
+            await session_service.create_session(
+                app_name=self.app_name,
+                user_id=user_id,
+                session_id=session_id,
+            )
+            self._sessions.add(session_key)
+
+            logger.info(f"Session created: {session_key}")
+        except Exception as e:
+            logger.error(f"Failed to create session {session_key}: {e}")
+            raise
 
     def register_tool_handler(self, name: str, handler: Any) -> None:
         """
@@ -186,6 +209,8 @@ class ADKAdapter(BaseLLMAdapter):
         Returns:
             Standardized LLMResponse
         """
+        logger.info(f"Sending message: session={session_id}, messages={len(messages)}")
+
         # Ensure agent exists
         if self._agent is None or self._runner is None:
             agent_name = kwargs.get("agent_name", "skill_agent")
@@ -205,10 +230,13 @@ class ADKAdapter(BaseLLMAdapter):
         # Get the latest user message
         latest_message = self._get_latest_user_message(messages)
         if not latest_message:
+            logger.warning("No user message found in messages")
             return LLMResponse(
                 content="No user message found",
                 stop_reason="error",
             )
+
+        logger.debug(f"Latest message length: {len(latest_message)}")
 
         # Create ADK content from message
         adk_content = types.Content(
@@ -221,39 +249,53 @@ class ADKAdapter(BaseLLMAdapter):
         tool_calls: list[ToolCall] = []
         raw_events: list[Any] = []
 
-        async for event in self._runner.run_async(
-            user_id=user_id,
-            session_id=session_id,
-            new_message=adk_content,
-        ):
-            raw_events.append(event)
+        # Check runner is initialized
+        if self._runner is None:
+            raise RuntimeError("Runner not initialized. Call create_agent first.")
 
-            # Process tool calls
-            if event.content and hasattr(event, "get_function_calls"):
-                function_calls = event.get_function_calls()
-                if function_calls:
-                    for fc in function_calls:
-                        tool_calls.append(
-                            ToolCall(
-                                id=getattr(fc, "id", f"call_{len(tool_calls)}"),
-                                name=fc.name,
-                                input=dict(fc.args) if fc.args else {},
+        try:
+            async for event in self._runner.run_async(
+                user_id=user_id,
+                session_id=session_id,
+                new_message=adk_content,
+            ):
+                raw_events.append(event)
+
+                # Process tool calls
+                if event.content and hasattr(event, "get_function_calls"):
+                    function_calls = event.get_function_calls()
+                    if function_calls:
+                        for fc in function_calls:
+                            tool_calls.append(
+                                ToolCall(
+                                    id=getattr(fc, "id", f"call_{len(tool_calls)}"),
+                                    name=fc.name or "",  # Ensure name is not None
+                                    input=dict(fc.args) if fc.args else {},
+                                )
                             )
-                        )
+                            logger.debug(f"Tool call detected: {fc.name}")
 
-            # Process final response
-            if event.is_final_response() and event.content:
-                if event.content.parts:
-                    for part in event.content.parts:
-                        if hasattr(part, "text") and part.text:
-                            response_text += part.text
+                # Process final response
+                if event.is_final_response() and event.content:
+                    if event.content.parts:
+                        for part in event.content.parts:
+                            if hasattr(part, "text") and part.text:
+                                response_text += part.text
 
-        return LLMResponse(
-            content=response_text if response_text else None,
-            tool_calls=tool_calls,
-            stop_reason="end_turn" if not tool_calls else "tool_use",
-            raw_response=raw_events,
-        )
+            logger.info(
+                f"Message processed: session={session_id}, "
+                f"tool_calls={len(tool_calls)}, response_length={len(response_text)}"
+            )
+
+            return LLMResponse(
+                content=response_text if response_text else None,
+                tool_calls=tool_calls,
+                stop_reason="end_turn" if not tool_calls else "tool_use",
+                raw_response=raw_events,
+            )
+        except Exception as e:
+            logger.error(f"Error in send_message: {e}")
+            raise
 
     async def send_message_streaming(
         self,
@@ -283,6 +325,10 @@ class ADKAdapter(BaseLLMAdapter):
             LLMResponse chunks - intermediate chunks have is_streaming=True,
             final chunk has is_streaming=False with stop_reason set.
         """
+        logger.info(
+            f"Streaming message: session={session_id}, messages={len(messages)}"
+        )
+
         # Ensure agent exists (lazy initialization)
         if self._agent is None or self._runner is None:
             agent_name = kwargs.get("agent_name", "skill_agent")
@@ -302,12 +348,15 @@ class ADKAdapter(BaseLLMAdapter):
         # Get the latest user message
         latest_message = self._get_latest_user_message(messages)
         if not latest_message:
+            logger.warning("No user message found in streaming messages")
             yield LLMResponse(
                 content="No user message found",
                 stop_reason="error",
                 is_streaming=False,
             )
             return
+
+        logger.debug(f"Streaming message length: {len(latest_message)}")
 
         # Create ADK content from message
         adk_content = types.Content(
@@ -317,6 +366,11 @@ class ADKAdapter(BaseLLMAdapter):
 
         # Track tool calls across events
         tool_calls: list[ToolCall] = []
+        chunk_count = 0
+
+        # Check runner is initialized
+        if self._runner is None:
+            raise RuntimeError("Runner not initialized. Call create_agent first.")
 
         async for event in self._runner.run_async(
             user_id=user_id,
@@ -331,15 +385,17 @@ class ADKAdapter(BaseLLMAdapter):
                         tool_calls.append(
                             ToolCall(
                                 id=getattr(fc, "id", f"call_{len(tool_calls)}"),
-                                name=fc.name,
+                                name=fc.name or "",  # Ensure name is not None
                                 input=dict(fc.args) if fc.args else {},
                             )
                         )
+                        logger.debug(f"Streaming tool call: {fc.name}")
 
             # Yield intermediate content chunks
             if event.content and event.content.parts and not event.is_final_response():
                 for part in event.content.parts:
                     if hasattr(part, "text") and part.text:
+                        chunk_count += 1
                         yield LLMResponse(
                             content=part.text,
                             is_streaming=True,
@@ -355,6 +411,11 @@ class ADKAdapter(BaseLLMAdapter):
                             text_parts.append(part.text)
                     if text_parts:
                         final_content = "".join(text_parts)
+
+                logger.info(
+                    f"Streaming completed: session={session_id}, "
+                    f"chunks={chunk_count}, tool_calls={len(tool_calls)}"
+                )
 
                 yield LLMResponse(
                     content=final_content,
