@@ -108,8 +108,7 @@ def main():
         create_presentation(args.title, args.subtitle, slides, str(output_path))
         
         # Print file output marker for chat UI
-        if args.output_dir and '/tmp/skill_outputs/' in str(args.output_dir):
-            print(f'FILE_OUTPUT: {{"path": "{output_path}", "filename": "{args.output}", "mime_type": "application/vnd.openxmlformats-officedocument.presentationml.presentation"}}')
+        print(f'FILE_OUTPUT: {{"path": "{output_path.absolute()}", "filename": "{args.output}", "mime_type": "application/vnd.openxmlformats-officedocument.presentationml.presentation"}}')
         
         return 0
     except Exception as e:

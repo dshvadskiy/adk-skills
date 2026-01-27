@@ -56,6 +56,9 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 
 from skill_framework.agent import AgentBuilder
 from skill_framework.integration.adk_adapter import ADKAdapter
+from skill_framework.artifact_publisher import (
+    ArtifactPublisher, LocalBackend, get_publisher
+)
 
 
 # Request/Response models
@@ -75,31 +78,63 @@ class ChatResponse(BaseModel):
 app = FastAPI(title="Skills Framework Chat")
 agent_instance = None
 builder_instance = None
-file_storage: dict[str, Path] = {}
+artifact_publisher: ArtifactPublisher | None = None
+tool_outputs: list[str] = []  # Store tool outputs for FILE_OUTPUT extraction
 
 
-def extract_file_outputs(response: str, session_id: str) -> list[dict[str, str]] | None:
-    """Extract file output markers from agent response."""
-    # Look for pattern: FILE_OUTPUT: {"path": "...", "filename": "...", "mime_type": "..."}
+def extract_file_outputs_from_tool_output(tool_output: str) -> list[dict[str, str]] | None:
+    """Extract file output markers from tool output and publish artifacts."""
     pattern = r'FILE_OUTPUT:\s*\{"path":\s*"([^"]+)",\s*"filename":\s*"([^"]+)",\s*"mime_type":\s*"([^"]+)"\}'
-    matches = re.findall(pattern, response)
+    matches = re.findall(pattern, tool_output)
     
     if not matches:
         return None
     
+    publisher = get_publisher()
     files = []
-    for path_str, filename, mime_type in matches:
-        file_path = Path(path_str)
-        if file_path.exists():
-            file_id = f"{session_id}_{uuid.uuid4().hex[:8]}"
-            file_storage[file_id] = file_path
-            files.append({
-                "filename": filename,
-                "url": f"/api/files/{file_id}",
-                "mime_type": mime_type,
-            })
+    valid_paths = [(Path(p), fn, mt) for p, fn, mt in matches if Path(p).exists()]
     
-    return files if files else None
+    if not valid_paths:
+        return None
+    
+    if len(valid_paths) == 1:
+        path, filename, mime_type = valid_paths[0]
+        artifact = publisher.publish(path)
+        files.append({
+            "filename": artifact.filename,
+            "url": artifact.url,
+            "mime_type": artifact.mime_type,
+        })
+    else:
+        paths = [p for p, _, _ in valid_paths]
+        artifact = publisher.publish_many(paths)
+        files.append({
+            "filename": artifact.filename,
+            "url": artifact.url,
+            "mime_type": artifact.mime_type,
+        })
+    
+    return files
+
+
+def bash_tool_wrapper(original_bash_tool):
+    """Wrap bash_tool to capture FILE_OUTPUT markers."""
+    def wrapper(command: str, working_directory: str | None = None) -> str:
+        result = original_bash_tool(command, working_directory)
+        tool_outputs.append(result)
+        return result
+    return wrapper
+
+
+def extract_file_outputs() -> list[dict[str, str]] | None:
+    """Extract FILE_OUTPUT from all captured tool outputs."""
+    all_files = []
+    for output in tool_outputs:
+        files = extract_file_outputs_from_tool_output(output)
+        if files:
+            all_files.extend(files)
+    tool_outputs.clear()
+    return all_files if all_files else None
 
 
 def create_model(provider: str, model_name: str | None = None):
@@ -142,17 +177,36 @@ def create_model(provider: str, model_name: str | None = None):
 @app.on_event("startup")
 async def startup_event():
     """Initialize agent on startup."""
-    global agent_instance, builder_instance
+    global agent_instance, builder_instance, artifact_publisher
     
-    skills_dir = Path(__file__).parent.parent / "skills"
+    # Initialize artifact publisher (auto-configures from env)
+    artifact_publisher = get_publisher()
+    
+    # Monkey-patch ScriptExecutor to capture tool outputs
+    from skill_framework.core.script_executor import ScriptExecutor
+    original_execute = ScriptExecutor.execute
+    
+    def patched_execute(self, *args, **kwargs):
+        result = original_execute(self, *args, **kwargs)
+        if result.stdout:
+            tool_outputs.append(result.stdout)
+        return result
+    
+    ScriptExecutor.execute = patched_execute
+    
+    # Skills directory loaded from SKILLS_DIR env var or defaults to ./skills
+    from skill_framework.config import Config
+    skills_dir = Config.get_skills_dir()
+    
     provider = os.getenv("LLM_PROVIDER", "bedrock")
     model_name = os.getenv("MODEL_NAME")
     
     print(f"Initializing agent with provider: {provider}")
+    print(f"Skills directory: {skills_dir}")
     model = create_model(provider, model_name)
     
     adapter = ADKAdapter(model=model, app_name="skill_chat_demo")
-    builder_instance = AgentBuilder(skills_directory=skills_dir)
+    builder_instance = AgentBuilder()  # Uses SKILLS_DIR from .env
     
     agent_instance = builder_instance.create_agent(
         adapter=adapter,
@@ -199,13 +253,16 @@ async def get_favicon():
 
 @app.get("/api/files/{file_id}")
 async def download_file(file_id: str):
-    """Download a generated file."""
-    if file_id not in file_storage:
-        raise HTTPException(status_code=404, detail="File not found")
+    """Download a generated file (local backend only)."""
+    publisher = get_publisher()
     
-    file_path = file_storage[file_id]
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail="File no longer exists")
+    # Only works with LocalBackend
+    if not isinstance(publisher.backend, LocalBackend):
+        raise HTTPException(status_code=400, detail="Direct download not available with S3 backend")
+    
+    file_path = publisher.backend.get_file(file_id)
+    if not file_path or not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
     
     return FileResponse(
         path=file_path,
@@ -239,13 +296,14 @@ async def chat(request: ChatRequest):
     session_id = agent_instance.session_id
     
     try:
+        tool_outputs.clear()  # Clear previous outputs
         response = await agent_instance.chat(request.message)
         
         # Get active skills
         active_skills = agent_instance.active_skills
         
-        # Parse response for file outputs
-        files = extract_file_outputs(response, session_id)
+        # Extract files from tool outputs
+        files = extract_file_outputs()
         
         return ChatResponse(
             response=response,

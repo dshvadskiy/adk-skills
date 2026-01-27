@@ -36,6 +36,7 @@ uv run python examples/basic_agent.py
 
 - **[SPEC.md](SPEC.md)** - Complete architectural specification with pseudocode
 - **[CODE_EXECUTION.md](CODE_EXECUTION.md)** - Code execution guide for skills with scripts
+- **[CONFIG.md](CONFIG.md)** - Configuration guide (environment variables, deployment)
 - **[CHAT_UI.md](examples/CHAT_UI.md)** - Web chat interface documentation
 - **[AGENTS.md](AGENTS.md)** - Development guidelines for Claude Code
 - **[TASKS.md](TASKS.md)** - Project task tracking

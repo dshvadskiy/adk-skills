@@ -53,16 +53,20 @@ class SkillMetaTool:
 
     def __init__(
         self,
-        skills_directory: Path,
+        skills_directory: Optional[Path] = None,
         cache_enabled: bool = True,
     ):
         """
         Initialize Skill Meta-Tool.
 
         Args:
-            skills_directory: Path to skills folder
+            skills_directory: Path to skills folder (defaults to SKILLS_DIR env var)
             cache_enabled: Cache loaded skills in memory
         """
+        if skills_directory is None:
+            from ..config import Config
+            skills_directory = Config.get_skills_dir()
+        
         self.skills_dir = Path(skills_directory)
         self.cache_enabled = cache_enabled
 

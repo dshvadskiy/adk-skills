@@ -106,19 +106,22 @@ def create_model(provider: str, model_name: str | None = None):
 
 async def run_agent(provider: str, model_name: str | None = None) -> None:
     """Run an interactive agent with skill support."""
-    skills_dir = Path(__file__).parent.parent / "skills"
+    # Skills directory loaded from SKILLS_DIR env var or defaults to ./skills
+    from skill_framework.config import Config
+    skills_dir = Config.get_skills_dir()
 
     print("=" * 60)
     print(f"Skill Framework Agent - {provider.upper()}")
     print("=" * 60)
+    print(f"Skills directory: {skills_dir}")
 
     # Create model based on provider
     model = create_model(provider, model_name)
-    print(f"\nUsing model: {model}")
+    print(f"Using model: {model}")
 
-    # Create adapter and builder
+    # Create adapter and builder (skills_directory is optional, uses config)
     adapter = ADKAdapter(model=model, app_name="skill_demo")
-    builder = AgentBuilder(skills_directory=skills_dir)
+    builder = AgentBuilder()  # Uses SKILLS_DIR from .env
 
     # Create skill-enabled agent (all wiring handled automatically)
     agent = builder.create_agent(

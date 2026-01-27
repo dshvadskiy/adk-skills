@@ -27,16 +27,20 @@ class AgentBuilder:
 
     def __init__(
         self,
-        skills_directory: Path,
+        skills_directory: Optional[Path] = None,
         enable_cache: bool = True,
     ):
         """
         Initialize agent builder.
 
         Args:
-            skills_directory: Path to skills folder
+            skills_directory: Path to skills folder (defaults to SKILLS_DIR env var)
             enable_cache: Enable skill caching
         """
+        if skills_directory is None:
+            from ..config import Config
+            skills_directory = Config.get_skills_dir()
+        
         self.skills_dir = Path(skills_directory)
 
         # Initialize skill meta-tool
